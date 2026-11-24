@@ -33,6 +33,7 @@ const ACTIONS = {
   logs: () => `--- hour.log ---\n${tail('hour.log', 60)}`,
   hour: () => run(['src/hour.js']),
   publish: () => run(['src/publish.js']),
+  cron: () => execFileSync('/bin/bash', ['deploy/bootstrap.sh'], { cwd: path.join(HOME, 'trader'), timeout: 5 * 60_000, encoding: 'utf8' }),
 };
 
 async function main() {

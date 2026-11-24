@@ -240,9 +240,10 @@ function evaluate(s, now) {
   return note;
 }
 
-// ---------- hourly run ----------
+// ---------- run: every 5 min (scan + exits); minute < 5 = full hourly run (equity, eval, decision log) ----------
 async function hour() {
   const now = Date.now();
+  const full = new Date(now).getUTCMinutes() < 5;
   const s = getState();
   const cache = new Map();
   const allPos = [...db.read('pos.json', []), ...db.read('spos.json', [])];
@@ -265,7 +266,8 @@ async function hour() {
       const side = matches(st.long, m, btc) ? 'LONG' : matches(st.short, m, btc) ? 'SHORT' : null;
       if (!side) continue;
       const ck = `${st.id}|${m.s}`;
-      if (st.cooldownH && lastEntry[ck] && now - lastEntry[ck] < st.cooldownH * 3.6e6) continue;
+      const cdH = Math.max(st.cooldownH || 0, 1); // 5-min scan: same strategy+coin never re-enters within 1 h (hourly-run equivalent)
+      if (lastEntry[ck] && now - lastEntry[ck] < cdH * 3.6e6) continue;
       if (spos.some((p) => p.strategy === st.id && p.symbol === m.s)) continue;
       spos.push(buildPos(st.id, side, m, s, equity));
       lastEntry[ck] = now;
@@ -281,10 +283,10 @@ async function hour() {
   db.write('cooldown.json', lastEntry);
 
   const upnlNow = pos.reduce((a, p) => a + p.qty * (p.last - p.entry) * p.dir + p.funding - p.feeIn, 0);
-  db.append('equity.jsonl', { ts: now, equity: rd(s.wallet + upnlNow, 4) });
+  if (full) db.append('equity.jsonl', { ts: now, equity: rd(s.wallet + upnlNow, 4) });
 
   const h = new Date(now).getUTCHours();
-  const evalNote = h % 6 === 0 ? evaluate(s, now) : null;
+  const evalNote = full && h % 6 === 0 ? evaluate(s, now) : null;
   db.write('state.json', s);
 
   const summary = {
@@ -294,7 +296,9 @@ async function hour() {
     open: pos.length, shadowOpen: spos.length, shadowClosed: shR.closed.length, movers: market.length - 1,
     ...(evalNote ? { eval: evalNote.switch || 'değişiklik yok' } : {}),
   };
-  db.append('runs.jsonl', summary);
+  summary.full = full;
+  summary.changed = realR.closed.length + shR.closed.length + opened.length + (spos.length !== shR.keep.length ? 1 : 0) > 0;
+  if (full || summary.changed) db.append('runs.jsonl', summary);
   return summary;
 }
 
