@@ -1,5 +1,7 @@
 // Strategy lab: every strategy is data. long/short = condition lists [field, op, value] over the hourly snapshot.
-// Fields: px ch24 ch4h ch1h (%) atr1h (%) vr (x) rng (0–1) fund (%) qvM (M USDT) emaX emaT allig bbp bbw (%); btc.<field> for BTC.
+// Fields: px ch24 ch4h ch1h (%) atr1h (%) vr (x) rng (0–1) fund (%) qvM (M USDT) emaX emaT allig bbp bbw (%)
+// macdH (bp) macdX (±1 cross) rsi (0–100) ema50 (±1 side) stDir stFlip (Supertrend 10,3)
+// price action: engulf pin brk (±1) inside (1); multi-timeframe: tf4h (±1 vs 4h EMA9) tf4hUp (±1, 2 rising/falling 4h bars); btc.<field> for BTC.
 // exit: SL = clamp(ATR1h × sl_atr_k, sl_min, sl_max) %, TP = SL × tp_mult, max_hold_h hours.
 const MOM_L = [['ch24', '>', 0], ['ch4h', '>', 0], ['ch1h', '>', 0], ['rng', '>=', 0.7], ['vr', '>=', 1.3], ['fund', '<=', 0.05], ['btc.ch1h', '>', -0.5]];
 const MOM_S = [['ch24', '<', 0], ['ch4h', '<', 0], ['ch1h', '<', 0], ['rng', '<=', 0.3], ['vr', '>=', 1.3], ['fund', '>=', -0.05], ['btc.ch1h', '<', 0.5]];
@@ -28,6 +30,24 @@ const STRATEGIES = [
     desc: 'v2 girişleri, gerçek ATR stopu: SL = ATR1h ×1 (0,8–12 %), TP = 2×SL; kaldıraç stopa göre düşer' },
   { id: 'L-atrfit', long: [...MOM_L, ['atr1h', '<=', 2.5]], short: [...MOM_S, ['atr1h', '<=', 2.5]], exit: EX_STD, cooldownH: 12,
     desc: 'v2 girişleri, yalnız ATR1h ≤ 2,5 % coinler (stop gürültünün içinde kalmasın)' },
+  { id: 'L-macd', long: [['macdX', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['macdX', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'MACD(12,26,9) histogram kesişimi + EMA50 yönü + hacim ≥1,2×' },
+  { id: 'L-rsi', long: [['ema50', '==', 1], ['rsi', '>=', 40], ['rsi', '<=', 55], ['ch1h', '>', 0]], short: [['ema50', '==', -1], ['rsi', '>=', 45], ['rsi', '<=', 60], ['ch1h', '<', 0]], exit: EX_STD, cooldownH: 12,
+    desc: 'Trend içi geri çekilme: EMA50 yönünde, RSI(14) 40–55 (short 45–60), son saat dönüş' },
+  { id: 'L-st', long: [['stFlip', '==', 1], ['vr', '>=', 1.2]], short: [['stFlip', '==', -1], ['vr', '>=', 1.2]], exit: EX_ATR, cooldownH: 12,
+    desc: 'Supertrend(10,3) dönüşü + hacim; ATR stop, kaldıraç stopa göre' },
+  { id: 'L-stfade', long: [['stFlip', '==', 1], ['ch24', '<=', -5]], short: [['stFlip', '==', -1], ['ch24', '>=', 5]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'Supertrend dönüşü 24s hareketin tersine (Saga6 fikri: yorulan trendi sönümle)' },
+  { id: 'L-engulf', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_STD, cooldownH: 12,
+    desc: 'Price action: yutan mum (1s) EMA50 yönünde + hacim' },
+  { id: 'L-pin', long: [['pin', '==', 1], ['rsi', '<=', 45]], short: [['pin', '==', -1], ['rsi', '>=', 55]], exit: EX_STD, cooldownH: 12,
+    desc: 'Price action: pin bar reddi (uzun fitil) + RSI aşırı bölgeye yakın' },
+  { id: 'L-brk', long: [['brk', '==', 1], ['vr', '>=', 1.5]], short: [['brk', '==', -1], ['vr', '>=', 1.5]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'Price action: 1s kapanış önceki 24 saatin zirve/dibini kırdı + hacim ≥1,5×' },
+  { id: 'L-mtf', long: [['tf4h', '==', 1], ['tf4hUp', '==', 1], ['ema50', '==', 1], ['rsi', '>=', 45], ['rsi', '<=', 65], ['ch1h', '>', 0]], short: [['tf4h', '==', -1], ['tf4hUp', '==', -1], ['ema50', '==', -1], ['rsi', '>=', 35], ['rsi', '<=', 55], ['ch1h', '<', 0]], exit: EX_STD, cooldownH: 12,
+    desc: 'Çoklu zaman dilimi: 4s trend + 4s ardışık yön + 1s EMA50 aynı yönde, RSI aşırı değil' },
+  { id: 'L-mtfpa', long: [['tf4h', '==', 1], ['engulf', '==', 1]], short: [['tf4h', '==', -1], ['engulf', '==', -1]], exit: EX_STD, cooldownH: 12,
+    desc: 'Çoklu zaman dilimi + price action: 4s trend yönünde 1s yutan mum' },
 ];
 
 const OPS = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b };

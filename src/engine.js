@@ -16,8 +16,7 @@ const CFG = {
   maxOpen: 3,
   minQv: 50e6,
   topN: 10,
-  switchMinN: 10, switchPF: 1.3, switchEdge: 0.3, // trade-count switch rule
-  evalEveryTrades: 10, // evaluate after every 10 closed trades (real + lab), not on a clock
+  switchMinN: 10, switchPF: 1.3, switchEdge: 0.3, // 6-hourly switch rule
 };
 const MIN = 60_000;
 const rd = (x, d = 4) => (x == null || !isFinite(x) ? x : Math.round(x * 10 ** d) / 10 ** d);
@@ -26,7 +25,7 @@ const rd = (x, d = 4) => (x == null || !isFinite(x) ? x : Math.round(x * 10 ** d
 function getState() {
   return db.read('state.json', null) || {
     wallet: CFG.startWallet, startWallet: CFG.startWallet, active: 'v1', activeSince: Date.now(),
-    switchMinN: CFG.switchMinN, probation: null, seq: 0, createdAt: Date.now(), history: [], closedSinceEval: 0,
+    switchMinN: CFG.switchMinN, probation: null, seq: 0, createdAt: Date.now(), history: [],
   };
 }
 
@@ -52,6 +51,7 @@ function indicators(done, last) {
     allig: lips > teeth && teeth > jaw ? 1 : lips < teeth && teeth < jaw ? -1 : 0,
     bbp: sd ? rd((last - (mid - 2 * sd)) / (4 * sd), 2) : 0.5,
     bbw: rd(((4 * sd) / mid) * 100, 2),
+    ...require('./extra')(done, last),
   };
 }
 
@@ -205,7 +205,7 @@ async function processBook(list, s, now, real, cache) {
   return { keep, closed };
 }
 
-// ---------- stats + trade-count switch rule ----------
+// ---------- stats + 6-hourly switch rule ----------
 function stats(trades) {
   const w = trades.filter((t) => t.net > 0).reduce((a, t) => a + t.net, 0);
   const l = -trades.filter((t) => t.net <= 0).reduce((a, t) => a + t.net, 0);
@@ -217,7 +217,7 @@ function evaluate(s, now) {
   const sh = db.lines('strades.jsonl').filter((t) => t.openedAt >= since);
   const by = Object.fromEntries(STRATEGIES.map((x) => [x.id, stats(sh.filter((t) => t.strategy === x.id))]));
   const act = by[s.active];
-  const note = { t: now, active: s.active, stats: by, trigger: `${s.closedSinceEval || 0} closed trades` };
+  const note = { t: now, active: s.active, stats: by };
   if (s.probation) { // first 10 real trades after a switch must keep PF >= 1, else the bar goes back to 20
     const rt = db.lines('trades.jsonl').filter((t) => t.openedAt >= s.probation.since);
     if (rt.length >= 10) {
@@ -227,26 +227,21 @@ function evaluate(s, now) {
       s.probation = null;
     }
   }
-  const ranked = Object.entries(by)
+  const best = Object.entries(by)
     .filter(([id, x]) => id !== s.active && x.n >= s.switchMinN && x.pf >= CFG.switchPF && x.pf >= act.pf + CFG.switchEdge)
-    .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net);
-  const best = ranked[0];
-  const tied = best ? ranked.filter(([, x]) => x.pf === best[1].pf && x.net === best[1].net).map(([id]) => id) : [];
-  if (tied.length > 1) { // tie on PF and net: no switch, wait until the results separate
-    note.tie = { ids: tied, pf: best[1].pf, net: best[1].net, n: best[1].n };
-  } else if (best) {
+    .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net)[0];
+  if (best) {
     note.switch = { from: s.active, to: best[0], pf: best[1].pf, n: best[1].n, activePf: act.pf };
     s.history.push({ t: now, from: s.active, to: best[0], pf: best[1].pf, n: best[1].n });
     s.active = best[0];
     s.activeSince = now;
     s.probation = { since: now };
   }
-  s.closedSinceEval = 0;
   db.append('evals.jsonl', note);
   return note;
 }
 
-// ---------- run: every 5 min (scan + exits); minute < 5 = full hourly run (equity, decision log) ----------
+// ---------- run: every 5 min (scan + exits); minute < 5 = full hourly run (equity, eval, decision log) ----------
 async function hour() {
   const now = Date.now();
   const full = new Date(now).getUTCMinutes() < 5;
@@ -291,8 +286,8 @@ async function hour() {
   const upnlNow = pos.reduce((a, p) => a + p.qty * (p.last - p.entry) * p.dir + p.funding - p.feeIn, 0);
   if (full) db.append('equity.jsonl', { ts: now, equity: rd(s.wallet + upnlNow, 4) });
 
-  s.closedSinceEval = (s.closedSinceEval || 0) + realR.closed.length + shR.closed.length;
-  const evalNote = s.closedSinceEval >= CFG.evalEveryTrades ? evaluate(s, now) : null;
+  const h = new Date(now).getUTCHours();
+  const evalNote = full && h % 6 === 0 ? evaluate(s, now) : null;
   db.write('state.json', s);
 
   const summary = {
@@ -300,12 +295,11 @@ async function hour() {
     closed: realR.closed.map((t) => `${t.symbol} ${t.side} ${t.exitReason} ${t.net} USDT`),
     opened: opened.map((p) => `${p.symbol} ${p.side} ${p.lev}x SL ${p.sl_pct}% TP ${p.tp_pct}%`),
     open: pos.length, shadowOpen: spos.length, shadowClosed: shR.closed.length, movers: market.length - 1,
-    closedSinceEval: s.closedSinceEval,
-    ...(evalNote ? { eval: evalNote.switch || (evalNote.tie ? `beraberlik (${evalNote.tie.ids.join(', ')}), bekleniyor` : 'değişiklik yok') } : {}),
+    ...(evalNote ? { eval: evalNote.switch || 'değişiklik yok' } : {}),
   };
   summary.full = full;
   summary.changed = realR.closed.length + shR.closed.length + opened.length + (spos.length !== shR.keep.length ? 1 : 0) > 0;
-  if (full || summary.changed || evalNote) db.append('runs.jsonl', summary);
+  if (full || summary.changed) db.append('runs.jsonl', summary);
   return summary;
 }
 
