@@ -227,10 +227,14 @@ function evaluate(s, now) {
       s.probation = null;
     }
   }
-  const best = Object.entries(by)
+  const ranked = Object.entries(by)
     .filter(([id, x]) => id !== s.active && x.n >= s.switchMinN && x.pf >= CFG.switchPF && x.pf >= act.pf + CFG.switchEdge)
-    .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net)[0];
-  if (best) {
+    .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net);
+  const best = ranked[0];
+  const tied = best ? ranked.filter(([, x]) => x.pf === best[1].pf && x.net === best[1].net).map(([id]) => id) : [];
+  if (tied.length > 1) { // tie on PF and net: no switch, wait until the results separate
+    note.tie = { ids: tied, pf: best[1].pf, net: best[1].net, n: best[1].n };
+  } else if (best) {
     note.switch = { from: s.active, to: best[0], pf: best[1].pf, n: best[1].n, activePf: act.pf };
     s.history.push({ t: now, from: s.active, to: best[0], pf: best[1].pf, n: best[1].n });
     s.active = best[0];
@@ -297,7 +301,7 @@ async function hour() {
     opened: opened.map((p) => `${p.symbol} ${p.side} ${p.lev}x SL ${p.sl_pct}% TP ${p.tp_pct}%`),
     open: pos.length, shadowOpen: spos.length, shadowClosed: shR.closed.length, movers: market.length - 1,
     closedSinceEval: s.closedSinceEval,
-    ...(evalNote ? { eval: evalNote.switch || 'değişiklik yok' } : {}),
+    ...(evalNote ? { eval: evalNote.switch || (evalNote.tie ? `beraberlik (${evalNote.tie.ids.join(', ')}), bekleniyor` : 'değişiklik yok') } : {}),
   };
   summary.full = full;
   summary.changed = realR.closed.length + shR.closed.length + opened.length + (spos.length !== shR.keep.length ? 1 : 0) > 0;
