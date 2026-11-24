@@ -166,6 +166,8 @@ function buildPos(sid, side, snap, s, equity) {
     liq: entry * (1 - dir * (1 / lev - CFG.mmr)),
     openedAt: now, checkedTs: now, fundingCheckedTs: now, maxHoldMs: ex.max_hold_h * 3.6e6,
     mfe: 0, mae: 0, last: entry, snap,
+    reason: `${sid}: ${st.desc} · ch24 ${snap.ch24} % · ch1h ${snap.ch1h} % · vr ${snap.vr}x · ATR1h ${snap.atr1h} %`,
+    supports: [sid],
   };
 }
 
@@ -182,6 +184,8 @@ function settle(pos, exit, s, real) {
     openedAt: pos.openedAt, closedAt: exit.ts, holdMin: Math.round((exit.ts - pos.openedAt) / MIN),
     entry: rd(pos.entry, 8), exit: rd(px, 8), sl_pct: pos.sl_pct, tp_pct: pos.tp_pct, notional: rd(pos.notional, 2),
     margin: rd(pos.margin, 4), net: rd(net, 4), roiMarginPct: rd((net / pos.margin) * 100, 1),
+    sl: rd(pos.sl, 8), tp: rd(pos.tp, 8), feeIn: rd(pos.feeIn, 6), feeOut: rd(feeOut, 6), funding: rd(pos.funding, 6),
+    reason: pos.reason, supports: [pos.strategy], lab: !real, version: pos.strategy,
     mfe: rd(pos.mfe, 2), mae: rd(pos.mae, 2), exitReason: exit.reason, real: !!real,
     ...(real ? { walletAfter: rd(s.wallet, 4) } : {}),
   };
@@ -250,6 +254,7 @@ async function hour() {
 
   const market = await snapshot();
   const btc = market.find((m) => m.s === 'BTCUSDT');
+  db.write('market.json', { ts: now, market: market.filter((m) => m.s !== 'BTCUSDT').map((m) => ({ s: m.s, px: m.px, ch24: m.ch24, ch1h: m.ch1h })) });
   const lastEntry = db.read('cooldown.json', {});
   const opened = [];
   const upnl = pos.reduce((a, p) => a + p.qty * (p.last - p.entry) * p.dir, 0);
@@ -274,6 +279,9 @@ async function hour() {
   db.write('pos.json', pos);
   db.write('spos.json', spos);
   db.write('cooldown.json', lastEntry);
+
+  const upnlNow = pos.reduce((a, p) => a + p.qty * (p.last - p.entry) * p.dir + p.funding - p.feeIn, 0);
+  db.append('equity.jsonl', { ts: now, equity: rd(s.wallet + upnlNow, 4) });
 
   const h = new Date(now).getUTCHours();
   const evalNote = h % 6 === 0 ? evaluate(s, now) : null;
