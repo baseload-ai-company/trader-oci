@@ -1,0 +1,26 @@
+name: deploy-dashboard-page
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/pages.js', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: node deploy/pages.js _site
+      - name: Commit page files to gh-pages (keeps data.json)
+        run: |
+          git fetch origin gh-pages
+          git worktree add gh gh-pages
+          cp -r _site/. gh/
+          cd gh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "degisiklik yok" || (git commit -m "Dashboard page (old Claude Trader layout)" && git push origin gh-pages)
