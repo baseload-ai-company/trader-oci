@@ -35,6 +35,17 @@ const ACTIONS = {
   publish: () => run(['src/publish.js']),
   cron: () => execFileSync('/bin/bash', ['deploy/bootstrap.sh'], { cwd: path.join(HOME, 'trader'), timeout: 5 * 60_000, encoding: 'utf8' }),
   square: () => run(['-e', "require('./src/square').hourly().then((r) => console.log(JSON.stringify(r)))"]),
+  eval: () => { // run the switch rule now (same rule as the trade-count trigger); skipped while an hour run holds the lock
+    if (fs.existsSync(path.join(db.DIR, 'hour.lock'))) return 'hour.js çalışıyor (kilit var), değerlendirme atlandı';
+    const { _test } = require('./engine');
+    const s = _test.getState();
+    s.closedSinceEval = s.closedSinceEval || 0;
+    const n = _test.evaluate(s, Date.now());
+    db.write('state.json', s);
+    const rows = Object.entries(n.stats).map(([id, x]) => `${id}: n ${x.n} · PF ${x.pf} · WR ${Math.round(x.wr * 100)} % · net ${x.net} USDT`);
+    return [`aktif (önce): ${n.active} · aktif (sonra): ${s.active} · eşik n >= ${s.switchMinN}`,
+      n.switch ? `GEÇİŞ: ${JSON.stringify(n.switch)}` : 'geçiş yok', ...rows].join('\n');
+  },
 };
 
 async function main() {
