@@ -17,6 +17,7 @@ async function main() {
     const r = await hour();
     console.log(JSON.stringify(r));
     if (!r.full && !r.changed) db.append('runs.jsonl', r); // every 5-min run goes into the decision log
+    try { const gone = require('./retire').retire(r.active); if (gone.length) console.log(new Date().toISOString(), 'emekli:', gone.join(', ')); } catch (e) { console.error('retire HATA', e.message); }
     try { console.log(new Date().toISOString(), 'dashboard:', await publish()); } catch (e) { console.error('dashboard HATA', e.message); }
     if (r.full) try { console.log(new Date().toISOString(), 'square:', JSON.stringify(await require('./square').hourly())); } catch (e) { console.error('square HATA', e.message); }
   } finally {

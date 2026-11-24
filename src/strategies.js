@@ -65,4 +65,7 @@ function exitFor(e, atr1h) {
   return { sl_pct: Math.round(sl * 100) / 100, tp_pct: Math.round(sl * e.tp_mult * 100) / 100, max_hold_h: e.max_hold_h };
 }
 
-module.exports = { STRATEGIES, matches, exitFor };
+// Retired strategies (retire.js) are left out of the scan and the switch rule; their closed trades stay in the history.
+const RETIRED = new Set(require('./retire').retiredIds());
+
+module.exports = { STRATEGIES: STRATEGIES.filter((x) => !RETIRED.has(x.id)), ALL_STRATEGIES: STRATEGIES, RETIRED, matches, exitFor };
