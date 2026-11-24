@@ -6,7 +6,7 @@ const path = require('path');
 const os = require('os');
 const bn = require('./binance');
 const db = require('./store');
-const { STRATEGIES } = require('./strategies');
+const { ALL_STRATEGIES: STRATEGIES, RETIRED } = require('./strategies');
 
 const REPO = 'baseload-ai-company/trader-oci';
 const BRANCH = 'gh-pages';
@@ -82,7 +82,7 @@ async function build() {
     decisions: runs.map((r) => ({ ts: Date.parse(r.t), version: r.active, summary: runSummary(r), actions: [...r.opened.map((x) => `AÇ ${x}`), ...r.closed.map((x) => `KAPAT ${x}`)] })),
     strategies, market: db.read('market.json', null),
     skipped_open: sopen, skipped,
-    lab: STRATEGIES.map((L) => ({ id: L.id, rule: L.desc, status: L.id === s.active ? 'aktif' : 'aday' })),
+    lab: STRATEGIES.map((L) => ({ id: L.id, rule: L.desc, status: L.id === s.active ? 'aktif' : RETIRED.has(L.id) ? 'emekli' : 'aday' })),
     charts: await charts(chartItems, now),
   };
 }
