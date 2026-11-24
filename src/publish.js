@@ -1,81 +1,167 @@
-// Writes data.json to the gh-pages branch (GitHub Pages dashboard) via the Contents API.
+// Writes data.json to the gh-pages branch in the format the dashboard (index.html, the old Claude Trader page) reads.
 // Token: ~/.trader-token (fine-grained, this repo only, Contents read/write). Never logged.
+// Once a day (UTC 00) the gh-pages history is squashed to a single commit so hourly data commits don't grow the repo.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const bn = require('./binance');
 const db = require('./store');
 const { STRATEGIES } = require('./strategies');
 
 const REPO = 'baseload-ai-company/trader-oci';
 const BRANCH = 'gh-pages';
-const FILE = 'data.json';
+const CFG = { fee: 0.0005, slip: 0.0005, mmr: 0.005, maxLev: 20, startWallet: 10, baseNotional: 6, maxOpen: 3, minQv_musdt: 50, topN: 10 };
 const rd = (x, d = 4) => (x == null || !isFinite(x) ? x : Math.round(x * 10 ** d) / 10 ** d);
+const H = 3.6e6;
 
-function stats(trades) {
-  const w = trades.filter((t) => t.net > 0).reduce((a, t) => a + t.net, 0);
-  const l = -trades.filter((t) => t.net <= 0).reduce((a, t) => a + t.net, 0);
-  return { n: trades.length, net_usdt: rd(w - l, 4), pf: l > 0 ? rd(w / l, 2) : w > 0 ? 99 : 0, wr_pct: trades.length ? rd((100 * trades.filter((t) => t.net > 0).length) / trades.length, 1) : 0 };
+function compactPos(p, now) {
+  const last = p.last ?? p.entry;
+  return {
+    id: p.id, sym: p.symbol, side: p.side, lev: p.lev,
+    entry: rd(p.entry, 8), last: rd(last, 8), sl: rd(p.sl, 8), tp: rd(p.tp, 8), liq: rd(p.liq, 8),
+    notional_usdt: rd(p.notional, 2), margin_usdt: rd(p.margin, 4),
+    upnl_usdt: rd(p.qty * (last - p.entry) * p.dir + p.funding - p.feeIn, 4),
+    mfe_pct: rd(p.mfe, 2), mae_pct: rd(p.mae, 2), age_h: rd((now - p.openedAt) / H, 1), openedAt: p.openedAt,
+    version: p.strategy, supports: p.supports || [p.strategy], lab: false,
+    reason: p.reason || `${p.strategy} kuralı eşleşti`,
+  };
 }
 
-function build() {
+function runSummary(r) {
+  const saw = `${r.movers} hareketli coin tarandı; ${r.open} açık gerçek, ${r.shadowOpen} açık gölge pozisyon.`;
+  const did = [
+    r.opened.length ? `Açılan: ${r.opened.join('; ')}` : 'Yeni gerçek pozisyon yok (aktif stratejinin koşulları sağlanmadı ya da 3 pozisyon sınırı dolu).',
+    r.closed.length ? `Kapanan: ${r.closed.join('; ')}` : '',
+    r.eval ? `6 saatlik değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (PF ${r.eval.pf}, ${r.eval.n} işlem)`}` : '',
+  ].filter(Boolean).join(' ');
+  const exp = `Kural motoru: aktif strateji ${r.active}; SL/TP 1 dakikalık mumlarla izleniyor.`;
+  return `Gördüm: ${saw}\nKarar: ${did}\nBeklenti: ${exp}`;
+}
+
+// 15m closes around each position, cached for closed trades (they never change).
+async function charts(items, now) {
+  const cache = db.read('charts-cache.json', {});
+  const out = [];
+  for (const it of items) {
+    const key = `${it.sym}|${it.openedAt}`;
+    if (it.closedAt && cache[key]) { out.push(cache[key]); continue; }
+    try {
+      const start = it.openedAt - H, end = Math.min(now, (it.closedAt || now) + H);
+      const k = await bn.klines(it.sym, '15m', { startTime: start, endTime: end, limit: 200 });
+      const c = { sym: it.sym, openedAt: it.openedAt, interval: '15m', candles: k.map((x) => [x[0], null, null, +x[4]]) };
+      if (it.closedAt) cache[key] = c;
+      out.push(c);
+    } catch { /* chart is optional */ }
+  }
+  const keep = new Set(out.map((c) => `${c.sym}|${c.openedAt}`));
+  for (const k of Object.keys(cache)) if (!keep.has(k)) delete cache[k];
+  db.write('charts-cache.json', cache);
+  return out;
+}
+
+async function build() {
+  const now = Date.now();
   const s = db.read('state.json', {});
-  const pos = db.read('pos.json', []);
-  const spos = db.read('spos.json', []);
-  const trades = db.lines('trades.jsonl');
-  const strades = db.lines('strades.jsonl');
-  const runs = db.lines('runs.jsonl').slice(-48);
-  const evals = db.lines('evals.jsonl').slice(-12);
-  const upnl = pos.reduce((a, p) => a + p.qty * (p.last - p.entry) * p.dir + p.funding - p.feeIn, 0);
-  const lab = STRATEGIES.map((x) => ({
-    id: x.id, desc: x.desc, active: x.id === s.active,
-    all: stats(strades.filter((t) => t.strategy === x.id)),
-    since_active: stats(strades.filter((t) => t.strategy === x.id && t.openedAt >= s.activeSince)),
-    open: spos.filter((p) => p.strategy === x.id).length,
-  }));
-  const exits = {};
-  for (const t of trades) exits[t.exitReason] = (exits[t.exitReason] || 0) + 1;
+  const trades = db.lines('trades.jsonl').map((t) => ({ ...t, version: t.version || t.strategy, supports: t.supports || [t.strategy], reason: t.reason || `${t.strategy} kuralı` }));
+  const strades = db.lines('strades.jsonl').map((t) => ({ ...t, version: t.version || t.strategy, supports: t.supports || [t.strategy], lab: true, reason: t.reason || `${t.strategy} kuralı` }));
+  const open = db.read('pos.json', []).map((p) => compactPos(p, now));
+  const sopen = db.read('spos.json', []).map((p) => ({ ...compactPos(p, now), lab: true }));
+  const runs = db.lines('runs.jsonl').slice(-72);
+  const equity = db.lines('equity.jsonl').slice(-2000);
+  const strategies = [{ version: 'v1', at: s.createdAt, rules: STRATEGIES.find((x) => x.id === 'v1').desc, reason: 'Oracle Frankfurt üzerinde yeni sistemin başlangıç stratejisi (kural motoru, saatlik).' },
+    ...(s.history || []).map((h) => ({ version: h.to, at: h.t, rules: (STRATEGIES.find((x) => x.id === h.to) || {}).desc || h.to,
+      reason: `6 saatlik kural: ${h.from} yerine geçti (PF ${h.pf}, ${h.n} gölge işlem).` }))];
+  const skipped = strades.slice(-1000);
+  const chartItems = [...open, ...sopen.slice(-30)].map((p) => ({ sym: p.sym, openedAt: p.openedAt }))
+    .concat([...trades.slice(-20), ...skipped.slice(-30)].map((t) => ({ sym: t.symbol, openedAt: t.openedAt, closedAt: t.closedAt })));
   return {
-    updated: new Date().toISOString(),
-    wallet_usdt: rd(s.wallet, 4), start_wallet_usdt: s.startWallet, upnl_usdt: rd(upnl, 4),
-    equity_usdt: rd((s.wallet || 0) + upnl, 4),
-    active: s.active, active_since: s.activeSince ? new Date(s.activeSince).toISOString() : null,
-    switch_min_n: s.switchMinN, history: s.history || [],
-    real: stats(trades), exits,
-    open: pos.map((p) => ({
-      sym: p.symbol, side: p.side, strategy: p.strategy, lev: p.lev, entry: rd(p.entry, 8), last: rd(p.last, 8),
-      sl: rd(p.sl, 8), tp: rd(p.tp, 8), sl_pct: p.sl_pct, tp_pct: p.tp_pct, notional_usdt: rd(p.notional, 2),
-      upnl_usdt: rd(p.qty * (p.last - p.entry) * p.dir + p.funding - p.feeIn, 4),
-      opened: new Date(p.openedAt).toISOString(),
-    })),
-    trades: trades.slice(-100).reverse(),
-    equity: trades.map((t) => ({ t: new Date(t.closedAt).toISOString(), wallet_usdt: t.walletAfter })),
-    lab, evals, runs,
+    generated_utc: new Date(now).toISOString(),
+    config: CFG,
+    state: { wallet: s.wallet, startWallet: s.startWallet, version: s.active, createdAt: s.createdAt, activeSince: s.activeSince, switchMinN: s.switchMinN },
+    open, trades: trades.slice(-300), equity,
+    decisions: runs.map((r) => ({ ts: Date.parse(r.t), version: r.active, summary: runSummary(r), actions: [...r.opened.map((x) => `AÇ ${x}`), ...r.closed.map((x) => `KAPAT ${x}`)] })),
+    strategies, market: db.read('market.json', null),
+    skipped_open: sopen, skipped,
+    lab: STRATEGIES.map((L) => ({ id: L.id, rule: L.desc, status: L.id === s.active ? 'aktif' : 'aday' })),
+    charts: await charts(chartItems, now),
   };
 }
 
 async function gh(method, url, token, body) {
-  const r = await fetch(`https://api.github.com/repos/${REPO}${url}`, {
+  return fetch(`https://api.github.com/repos/${REPO}${url}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'trader-oci', 'X-GitHub-Api-Version': '2022-11-28' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return r;
+}
+
+// Replace gh-pages history with one parentless commit holding the current tree.
+async function squash(token) {
+  const ref = await gh('GET', `/git/ref/heads/${BRANCH}`, token);
+  if (!ref.ok) return `squash ref HTTP ${ref.status}`;
+  const head = (await ref.json()).object.sha;
+  const cm = await gh('GET', `/git/commits/${head}`, token);
+  if (!cm.ok) return `squash commit HTTP ${cm.status}`;
+  const tree = (await cm.json()).tree.sha;
+  const nc = await gh('POST', '/git/commits', token, { message: `dashboard snapshot ${new Date().toISOString()}`, tree, parents: [] });
+  if (!nc.ok) return `squash yeni commit HTTP ${nc.status}`;
+  const up = await gh('PATCH', `/git/refs/heads/${BRANCH}`, token, { sha: (await nc.json()).sha, force: true });
+  return up.ok ? 'geçmiş sıkıştırıldı' : `squash ref güncelleme HTTP ${up.status}`;
+}
+
+// One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
+// alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
+const PAGES_VER = 'pages-v2';
+const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
+const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
+const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
+
+async function putFile(token, p, buf, msg) {
+  const cur = await gh('GET', `/contents/${p}?ref=${BRANCH}`, token);
+  const sha = cur.ok ? (await cur.json()).sha : undefined;
+  const r = await gh('PUT', `/contents/${p}`, token, { message: msg, content: buf.toString('base64'), branch: BRANCH, ...(sha ? { sha } : {}) });
+  if (!r.ok) throw new Error(`${p} HTTP ${r.status}`);
+}
+
+async function ensureAssets(token) {
+  if (db.read('assets-ok.json', null) === PAGES_VER) return '';
+  const bin = ['icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/icon.svg', 'icons/maskable.svg', 'manifest.webmanifest', 'sw.js', 'index.html'];
+  for (const p of bin) {
+    const raw = await fetch(OLD + p);
+    if (!raw.ok) return ` · sayfa dosyası alınamadı ${p} HTTP ${raw.status}`;
+    let buf = Buffer.from(await raw.arrayBuffer());
+    if (p === 'index.html') {
+      let html = buf.toString('utf8');
+      if (!html.includes(CHART_OLD)) return ' · index.html grafik bloğu bulunamadı, sayfa güncellenmedi';
+      html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu her saat günceller')}");
+      buf = Buffer.from(html, 'utf8');
+    }
+    await putFile(token, p, buf, `page ${p}`);
+  }
+  await putFile(token, 'config.js', Buffer.from("// Oracle Frankfurt sunucusu her saat :01'de data.json'u günceller.\nwindow.DATA_URL = 'data.json';\n"), 'page config.js');
+  db.write('assets-ok.json', PAGES_VER);
+  return ' · eski dashboard sayfası kuruldu';
 }
 
 async function publish() {
   const tokenFile = path.join(os.homedir(), '.trader-token');
   if (!fs.existsSync(tokenFile)) return 'token yok, yayın atlandı';
   const token = fs.readFileSync(tokenFile, 'utf8').trim();
-  const data = build();
+  let assets;
+  try { assets = await ensureAssets(token); } catch (e) { assets = ` · sayfa kurulum hatası: ${e.message}`; }
+  const data = await build();
   const content = Buffer.from(JSON.stringify(data)).toString('base64');
+  let msg = 'yayın hatası: sha çakışması';
   for (let i = 0; i < 2; i++) {
-    const cur = await gh('GET', `/contents/${FILE}?ref=${BRANCH}`, token);
+    const cur = await gh('GET', `/contents/data.json?ref=${BRANCH}`, token);
     const sha = cur.ok ? (await cur.json()).sha : undefined;
-    const r = await gh('PUT', `/contents/${FILE}`, token, { message: `data ${data.updated}`, content, branch: BRANCH, ...(sha ? { sha } : {}) });
-    if (r.ok) return 'yayınlandı';
-    if (r.status !== 409) return `yayın hatası HTTP ${r.status}`;
+    const r = await gh('PUT', '/contents/data.json', token, { message: `data ${data.generated_utc}`, content, branch: BRANCH, ...(sha ? { sha } : {}) });
+    if (r.ok) { msg = `yayınlandı (${Math.round(content.length * 0.75 / 1024)} KB)`; break; }
+    if (r.status !== 409) { msg = `yayın hatası HTTP ${r.status}`; break; }
   }
-  return 'yayın hatası: sha çakışması';
+  msg += assets;
+  if (new Date().getUTCHours() === 0 || process.argv.includes('--squash')) msg += ' · ' + (await squash(token));
+  return msg;
 }
 
 module.exports = { publish, build };
