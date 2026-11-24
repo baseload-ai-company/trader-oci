@@ -1,0 +1,23 @@
+name: convert-data-once
+on:
+  push:
+    branches: [main]
+    paths: ['deploy/convert.js', '.github/workflows/convert.yml']
+permissions:
+  contents: write
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: |
+          git fetch origin gh-pages
+          git worktree add gh gh-pages
+          node deploy/convert.js gh/data.json
+          cd gh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --cached --quiet && echo "degisiklik yok" || (git commit -m "data.json: convert to dashboard format" && git push origin gh-pages)
