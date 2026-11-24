@@ -7,6 +7,38 @@ const os = require('os');
 const bn = require('./binance');
 const db = require('./store');
 const { ALL_STRATEGIES: STRATEGIES, RETIRED } = require('./strategies');
+const GOALS = require('./goals');
+
+// Tried-strategies table: PnL, BSR (win count share) and WSR (|PnL| share of winners), purpose and a data-driven reason.
+function triedSummary(strades, s) {
+  const pct = (x) => Math.round(x * 1000) / 10;
+  return STRATEGIES.map((L) => {
+    const t = strades.filter((x) => x.strategy === L.id);
+    const n = t.length, win = t.filter((x) => x.net > 0), los = t.filter((x) => x.net <= 0);
+    const gw = win.reduce((a, x) => a + x.net, 0), gl = -los.reduce((a, x) => a + x.net, 0);
+    const pnl = gw - gl, pf = gl > 0 ? gw / gl : (gw > 0 ? 99 : 0);
+    const bsr = n ? win.length / n : 0, wsr = gw + gl > 0 ? gw / (gw + gl) : 0;
+    const status = L.id === s.active ? 'aktif' : RETIRED.has(L.id) ? 'emekli' : 'aday';
+    let why;
+    if (!n) why = 'Henüz sinyal oluşmadı; koşullar en hareketli coinlerde nadiren aynı anda tutuyor.';
+    else if (n < 5) why = `Karar için erken (${n} işlem).`;
+    else if (pf >= 1.3 && wsr > bsr) why = `Başarısız değil: PF ${pf.toFixed(2)}, WSR > BSR (kazançlar kayıplardan büyük).`;
+    else {
+      const avg = (a, f) => (a.length ? a.reduce((x, y) => x + f(y), 0) / a.length : 0);
+      const fast = los.filter((x) => x.holdMin <= 15).length / (los.length || 1);
+      const near = los.filter((x) => x.tp_pct && x.mfe >= 0.5 * x.tp_pct).length / (los.length || 1);
+      const never = los.filter((x) => (x.mfe || 0) < 0.3).length / (los.length || 1);
+      if (fast >= 0.5) why = `Stop gürültüye takılıyor: kayıpların %${pct(fast)}'i 15 dakika içinde stop oldu (ort. stop %${avg(los, (x) => x.sl_pct).toFixed(2)}).`;
+      else if (near >= 0.4) why = `Fiyat hedefe yaklaşıp döndü: kayıpların %${pct(near)}'i hedefin yarısını gördü; TP uzak ya da kâr koruma yok.`;
+      else if (never >= 0.5) why = `Yön hatalı: kayıpların %${pct(never)}'i hiç kâra geçmedi; giriş sinyali tersine çalışıyor.`;
+      else if (wsr <= bsr) why = `Kazançlar küçük, kayıplar büyük: WSR %${pct(wsr)} ≤ BSR %${pct(bsr)}.`;
+      else why = `PF ${pf.toFixed(2)}: kazançlar kayıpları karşılamıyor.`;
+      if (status === 'emekli') why = `Emekli (${los.length} kayıp, PF ${pf.toFixed(2)}). ${why}`;
+    }
+    return { id: L.id, name: L.desc, status, n, pnl_usdt: Math.round(pnl * 1e4) / 1e4, pf: Math.round(pf * 100) / 100,
+      bsr_pct: pct(bsr), wsr_pct: pct(wsr), wsr_gt_bsr: n > 0 && wsr > bsr, goal: GOALS[L.id] || '', why };
+  }).sort((a, b) => b.pnl_usdt - a.pnl_usdt);
+}
 
 const REPO = 'baseload-ai-company/trader-oci';
 const BRANCH = 'gh-pages';
@@ -83,6 +115,7 @@ async function build() {
     strategies, market: db.read('market.json', null),
     skipped_open: sopen, skipped,
     lab: STRATEGIES.map((L) => ({ id: L.id, rule: L.desc, status: L.id === s.active ? 'aktif' : RETIRED.has(L.id) ? 'emekli' : 'aday' })),
+    lab_summary: triedSummary(strades, s),
     charts: await charts(chartItems, now),
   };
 }
@@ -111,10 +144,26 @@ async function squash(token) {
 
 // One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
 // alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
-const PAGES_VER = 'pages-v3';
+const PAGES_VER = 'pages-v4';
 const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
 const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
 const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
+
+// Tried-strategies table at the bottom of the "Strateji" view; fills itself from data.json.lab_summary.
+const TRIED_SECTION = '<section class="card" id="sec-denenen" data-view="strateji"><h2>Denenen stratejiler</h2><div class="sub" style="margin:-4px 0 10px">Laboratuvarda denenen her strateji: gölge işlemlerin PnL (USDT), BSR (kazanan işlem oranı) ve WSR (kazançların toplam mutlak PnL içindeki payı). Ölçüt: WSR &gt; BSR.</div><div class="scroll"><table id="tTried"></table></div></section>';
+const TRIED_SCRIPT = `<script>(function(){
+  const esc=(x)=>String(x==null?'':x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  async function draw(){
+    try{
+      const r=await fetch(window.DATA_URL,{cache:'no-store'}); const d=await r.json(); const L=d.lab_summary||[];
+      const col=(v)=>v>0?'var(--g)':v<0?'var(--r)':'var(--mut)';
+      const st=(s)=>s==='aktif'?'<b style="color:var(--g)">aktif</b>':s==='emekli'?'<span style="color:var(--r)">emekli</span>':'<span style="color:var(--mut)">aday</span>';
+      document.getElementById('tTried').innerHTML='<tr><th>Kod</th><th>Ad</th><th>Durum</th><th>İşlem</th><th>PnL (USDT)</th><th>BSR (%)</th><th>WSR (%)</th><th>WSR &gt; BSR</th><th>Amaç</th><th>Neden başarısız / not</th></tr>'+
+        L.map((x)=>'<tr><td><b>'+esc(x.id)+'</b></td><td style="min-width:220px">'+esc(x.name)+'</td><td>'+st(x.status)+'</td><td>'+x.n+'</td><td style="color:'+col(x.pnl_usdt)+'">'+(x.pnl_usdt>0?'+':'')+x.pnl_usdt.toFixed(4)+'</td><td>'+x.bsr_pct.toFixed(1)+'</td><td>'+x.wsr_pct.toFixed(1)+'</td><td>'+(x.n?(x.wsr_gt_bsr?'<span style="color:var(--g)">✓</span>':'<span style="color:var(--r)">✗</span>'):'–')+'</td><td style="min-width:220px">'+esc(x.goal)+'</td><td style="min-width:260px">'+esc(x.why)+'</td></tr>').join('');
+    }catch(e){ const t=document.getElementById('tTried'); if(t) t.innerHTML='<tr><td>Tablo yüklenemedi: '+esc(e.message)+'</td></tr>'; }
+  }
+  draw(); setInterval(draw,60000);
+})();</script>`;
 
 async function putFile(token, p, buf, msg) {
   const cur = await gh('GET', `/contents/${p}?ref=${BRANCH}`, token);
@@ -133,7 +182,8 @@ async function ensureAssets(token) {
     if (p === 'index.html') {
       let html = buf.toString('utf8');
       if (!html.includes(CHART_OLD)) return ' · index.html grafik bloğu bulunamadı, sayfa güncellenmedi';
-      html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu 5 dakikada bir günceller')}");
+      html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu 5 dakikada bir günceller')}")
+        .replace('</main>', `${TRIED_SECTION}\n</main>`).replace('</body>', `${TRIED_SCRIPT}\n</body>`);
       buf = Buffer.from(html, 'utf8');
     }
     await putFile(token, p, buf, `page ${p}`);

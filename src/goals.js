@@ -1,0 +1,22 @@
+// Purpose (hypothesis) of each lab strategy, shown in the dashboard's tried-strategies table.
+module.exports = {
+  v1: 'En hareketli coinlerde momentumun devam edeceği varsayımı; BTC yönüyle uyumlu girişler.',
+  v2: 'v1 ile aynı fikir; aynı coine art arda girip aynı hatayı tekrarlamamak.',
+  'L-wide': 'Stop gürültüye takılıyorsa daha geniş stopla momentumun nefes almasına izin vermek.',
+  'L-btc': 'Yalnız BTC de aynı yönde giderken girmek; piyasa rüzgârını arkaya almak.',
+  'L-mirror': 'Aşırı uzamış hareketin geri döneceği varsayımı (momentumun tersi).',
+  'L-emax': 'EMA9/21 kesişimiyle yeni başlayan trendi erken yakalamak.',
+  'L-allig': 'Alligator dizilimi oturmuş trendlere hacim teyidiyle binmek.',
+  'L-bbbrk': 'Bollinger bant kırılımında oynaklık patlamasını yakalamak.',
+  'L-atr': 'Momentum girişini koruyup stopu coinin gerçek oynaklığına (ATR) göre koymak.',
+  'L-atrfit': 'Yalnız 2,5 % stopun gürültüde kalmadığı sakin coinlerde işlem yapmak.',
+  'L-macd': 'MACD histogram dönüşüyle ivme değişimini EMA50 trendi yönünde yakalamak.',
+  'L-rsi': 'Trend içindeki geri çekilmeden (RSI 40–60) daha iyi fiyattan girmek.',
+  'L-st': 'Supertrend dönüşüyle yeni trendin başını yakalamak.',
+  'L-stfade': 'Saga6 fikri: 24 saatte çok gitmiş coinde Supertrend dönünce yorulan trendi sönümlemek.',
+  'L-engulf': 'Price action: trend yönündeki yutan mumu dönüş/devam sinyali saymak.',
+  'L-pin': 'Price action: uzun fitilli reddi aşırı bölgeden dönüş sinyali saymak.',
+  'L-brk': 'Price action: 24 saatlik zirve/dip kırılımında hacimli devamı yakalamak.',
+  'L-mtf': 'Çoklu zaman dilimi: 4 saatlik trend 1 saatlikle aynı yöndeyken girmek.',
+  'L-mtfpa': 'Çoklu zaman dilimi + price action: 4 saatlik trend yönündeki yutan mum.',
+};
