@@ -30,7 +30,7 @@ function compactPos(p, now) {
 function runSummary(r) {
   const saw = `${r.movers} hareketli coin tarandı; ${r.open} açık gerçek, ${r.shadowOpen} açık gölge pozisyon.`;
   const did = [
-    r.opened.length ? `Açılan: ${r.opened.join('; ')}` : 'Yeni gerçek pozisyon yok (aktif stratejinin koşulları sağlanmadı ya da 3 pozisyon sınırı dolu).',
+    r.opened.length ? `Açılan: ${r.opened.join('; ')}` : r.open >= 3 ? 'Yeni pozisyon yok: 3 pozisyon sınırı dolu.' : 'Pozisyon bulunmadı.',
     r.closed.length ? `Kapanan: ${r.closed.join('; ')}` : '',
     r.eval ? `6 saatlik değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (PF ${r.eval.pf}, ${r.eval.n} işlem)`}` : '',
   ].filter(Boolean).join(' ');
@@ -66,7 +66,7 @@ async function build() {
   const strades = db.lines('strades.jsonl').map((t) => ({ ...t, version: t.version || t.strategy, supports: t.supports || [t.strategy], lab: true, reason: t.reason || `${t.strategy} kuralı` }));
   const open = db.read('pos.json', []).map((p) => compactPos(p, now));
   const sopen = db.read('spos.json', []).map((p) => ({ ...compactPos(p, now), lab: true }));
-  const runs = db.lines('runs.jsonl').slice(-72);
+  const runs = db.lines('runs.jsonl').slice(-288);
   const equity = db.lines('equity.jsonl').slice(-2000);
   const strategies = [{ version: 'v1', at: s.createdAt, rules: STRATEGIES.find((x) => x.id === 'v1').desc, reason: 'Oracle Frankfurt üzerinde yeni sistemin başlangıç stratejisi (kural motoru, saatlik).' },
     ...(s.history || []).map((h) => ({ version: h.to, at: h.t, rules: (STRATEGIES.find((x) => x.id === h.to) || {}).desc || h.to,
@@ -111,7 +111,7 @@ async function squash(token) {
 
 // One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
 // alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
-const PAGES_VER = 'pages-v2';
+const PAGES_VER = 'pages-v3';
 const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
 const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
 const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
@@ -133,12 +133,12 @@ async function ensureAssets(token) {
     if (p === 'index.html') {
       let html = buf.toString('utf8');
       if (!html.includes(CHART_OLD)) return ' · index.html grafik bloğu bulunamadı, sayfa güncellenmedi';
-      html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu her saat günceller')}");
+      html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu 5 dakikada bir günceller')}");
       buf = Buffer.from(html, 'utf8');
     }
     await putFile(token, p, buf, `page ${p}`);
   }
-  await putFile(token, 'config.js', Buffer.from("// Oracle Frankfurt sunucusu her saat :01'de data.json'u günceller.\nwindow.DATA_URL = 'data.json';\n"), 'page config.js');
+  await putFile(token, 'config.js', Buffer.from("// Oracle Frankfurt sunucusu 5 dakikada bir data.json'u günceller; Pages derlemesini beklememek için doğrudan daldan okunur.\nwindow.DATA_URL = 'https://raw.githubusercontent.com/baseload-ai-company/trader-oci/gh-pages/data.json';\n"), 'page config.js');
   db.write('assets-ok.json', PAGES_VER);
   return ' · eski dashboard sayfası kuruldu';
 }
@@ -160,7 +160,7 @@ async function publish() {
     if (r.status !== 409) { msg = `yayın hatası HTTP ${r.status}`; break; }
   }
   msg += assets;
-  if (new Date().getUTCHours() === 0 || process.argv.includes('--squash')) msg += ' · ' + (await squash(token));
+  if ((new Date().getUTCHours() === 0 && new Date().getUTCMinutes() < 5) || process.argv.includes('--squash')) msg += ' · ' + (await squash(token));
   return msg;
 }
 

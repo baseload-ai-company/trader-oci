@@ -16,7 +16,8 @@ async function main() {
   try {
     const r = await hour();
     console.log(JSON.stringify(r));
-    if (r.full || r.changed) try { console.log(new Date().toISOString(), 'dashboard:', await publish()); } catch (e) { console.error('dashboard HATA', e.message); }
+    if (!r.full && !r.changed) db.append('runs.jsonl', r); // every 5-min run goes into the decision log
+    try { console.log(new Date().toISOString(), 'dashboard:', await publish()); } catch (e) { console.error('dashboard HATA', e.message); }
   } finally {
     fs.rmSync(LOCK, { force: true });
   }
