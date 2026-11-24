@@ -5,12 +5,21 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const db = require('./store');
-const { putFile } = require('./publish');
 
 const HOME = os.homedir();
 const LOGS = path.join(HOME, 'trader-logs');
+const REPO = 'baseload-ai-company/trader-oci';
 const tail = (f, n) => { try { return fs.readFileSync(path.join(LOGS, f), 'utf8').split('\n').slice(-n - 1).join('\n'); } catch { return `${f} yok`; } };
 const run = (args) => execFileSync('/usr/bin/node', args, { cwd: path.join(HOME, 'trader'), timeout: 15 * 60_000, encoding: 'utf8' });
+
+async function putResult(token, obj, msg) {
+  const h = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'trader-oci', 'X-GitHub-Api-Version': '2022-11-28' };
+  const url = `https://api.github.com/repos/${REPO}/contents/cmd-result.json`;
+  const cur = await fetch(`${url}?ref=gh-pages`, { headers: h });
+  const sha = cur.ok ? (await cur.json()).sha : undefined;
+  const r = await fetch(url, { method: 'PUT', headers: h, body: JSON.stringify({ message: msg, branch: 'gh-pages', content: Buffer.from(JSON.stringify(obj, null, 1)).toString('base64'), ...(sha ? { sha } : {}) }) });
+  if (!r.ok) throw new Error(`cmd-result HTTP ${r.status}`);
+}
 
 const ACTIONS = {
   status: () => {
@@ -38,7 +47,7 @@ async function main() {
   else { try { output = await fn(); } catch (e) { ok = false; output = String(e.stdout || '') + String(e.stderr || '') + e.message; } }
   const res = { id: q.id, action: q.action, at: new Date().toISOString(), ok, output: String(output).slice(-8000) };
   const token = fs.readFileSync(path.join(HOME, '.trader-token'), 'utf8').trim();
-  await putFile(token, 'cmd-result.json', Buffer.from(JSON.stringify(res, null, 1)), `cmd ${q.id} ${q.action}`);
+  await putResult(token, res, `cmd ${q.id} ${q.action}`);
   console.log(res.at, q.id, q.action, ok ? 'tamam' : 'hata');
 }
 
