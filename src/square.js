@@ -194,6 +194,32 @@ const MEANING_TR = 'Ne anlama geliyor: komisyon, kayma ve funding dahil kağıt 
 const iso = (ts) => new Date(ts).toISOString().replace(/\.\d+Z$/, 'Z');
 const istDay = (ts) => new Date(ts + 3 * 3.6e6).toISOString().slice(0, 10);
 
+// Whole-hour evaluation: closed trades, equity change, open positions, scans. Returns EN and TR lines.
+function hourCheck(trades, now) {
+  const from = now - 3.6e6;
+  const cl = trades.filter((t) => t.closedAt > from);
+  const net = cl.reduce((a, t) => a + t.net, 0), w = cl.filter((t) => t.net > 0).length;
+  const eq = db.lines('equity.jsonl').slice(-2).map((x) => x.equity);
+  const e0 = eq.length === 2 ? eq[0] : null, e1 = eq.length ? eq[eq.length - 1] : null;
+  const dPct = e0 ? ((e1 / e0) - 1) * 100 : null;
+  const open = db.read('pos.json', []);
+  const up = (p) => p.qty * ((p.last ?? p.entry) - p.entry) * p.dir + (p.funding || 0) - (p.feeIn || 0);
+  const runs = db.lines('runs.jsonl').filter((r) => Date.parse(r.t) > from);
+  const scans = runs.length, entries = runs.reduce((a, r) => a + (r.opened || []).length, 0);
+  const score = (dPct ?? 0);
+  const vEN = score > 0.5 ? pick(['Good hour ✅', 'Solid hour 💚', 'Green hour, I\'ll take it ✅']) : score < -0.5 ? pick(['Rough hour 😮‍💨', 'Red hour, logged it 👊', 'Not my hour 😤']) : pick(['Flat hour, nothing decisive 😐', 'Quiet hour, capital kept 🧘']);
+  const vTR = score > 0.5 ? 'İyi bir saat ✅' : score < -0.5 ? 'Zor bir saat 😮‍💨' : 'Yatay bir saat 😐';
+  const openEN = open.length ? open.map((p) => `$${coin(p.symbol)} ${p.side.toLowerCase()} ${sgn(EN, up(p), 4)} USDT`).join(', ') : 'none';
+  const openTR = open.length ? open.map((p) => `$${coin(p.symbol)} ${p.side} ${sgn(TR, up(p), 4)} USDT`).join(', ') : 'yok';
+  const en = [`Hour check ⏱️ ${cl.length ? `${cl.length} closed (${w}W/${cl.length - w}L), net ${sgn(EN, net, 4)} USDT.` : 'No trade closed this hour.'}`
+    + (e0 != null ? ` Equity ${EN(e0, 2)} → ${EN(e1, 2)} USDT (${sgn(EN, dPct, 1)}%).` : '')
+    + ` Still open: ${openEN}. ${scans} scans, ${entries} new entr${entries === 1 ? 'y' : 'ies'}. ${vEN}`];
+  const tr = [`Saat değerlendirmesi ⏱️ ${cl.length ? `${cl.length} kapanış (${w} kazanç/${cl.length - w} kayıp), net ${sgn(TR, net, 4)} USDT.` : 'Bu saat kapanan işlem yok.'}`
+    + (e0 != null ? ` Varlık ${TR(e0, 2)} → ${TR(e1, 2)} USDT (%${sgn(TR, dPct, 1)}).` : '')
+    + ` Açık: ${openTR}. ${scans} tarama, ${entries} yeni giriş. ${vTR}`];
+  return { en, tr };
+}
+
 // Called by hour.js on every full (:01) run. Cursor = last posted event time; first call only sets the cursor.
 async function hourly() {
   const cur = db.read('square-cursor.json', null);
@@ -226,7 +252,8 @@ async function hourly() {
     const verdicts = syms.map((sym) => recLine(recs.get(sym), false)).filter(Boolean);
     const wl = wallet != null ? pick([`Paper wallet now ${EN(wallet, 2)} USDT.`, `Wallet: ${EN(wallet, 2)} USDT (paper).`]) : 'Paper account.';
     const tags = syms.map((sym) => `$${coin(sym)}`).join(' ');
-    const body = eod ? [...eod.en, '', 'Last hour:', ...lines, '', ...verdicts] : [head, ...lines, '', ...verdicts, wl];
+    const hc = hourCheck(trades, now);
+    const body = eod ? [...eod.en, '', 'Last hour:', ...lines, '', ...hc.en, '', ...verdicts] : [head, ...lines, '', ...hc.en, '', ...verdicts, wl];
     const text = [...body, `${tags} #trading #crypto #papertrading${eod ? ' #dailyrecap' : ''}`].filter((x) => x !== null).join('\n').replace(/\n{3,}/g, '\n\n');
     const ts = evs[evs.length - 1].ts, day = new Date(ts).toISOString().slice(0, 10);
     const id = `${day}-trade-digest-${String(ts).slice(-9)}`;
@@ -236,11 +263,11 @@ async function hourly() {
     try {
       out.feed = await putFeed({
         id, topic: 'crypto', agent: AGENT, posted_at: iso(ts),
-        title: clip(head || e1[0].head), hook: lines[0], body: [[...lines.slice(1), ...verdicts, wl].join(' ')], meaning: MEANING,
+        title: clip(head || e1[0].head), hook: lines[0], body: [[...lines.slice(1), ...hc.en, ...verdicts, wl].join(' ')], meaning: MEANING,
         tags: ['Crypto', ...syms.map(coin), 'Paper trading'],
         sources: syms.slice(0, 3).map((sym) => ({ title: `Binance USDT-M Futures: ${sym}`, url: `https://www.binance.com/en/futures/${sym}`, date: day })),
         media: null, more: null, linkedin: null, reviewed: false, comments: [],
-        tr: { title: clip(evs.length === 1 ? t1[0].head : `Bu saat: ${partsTR}`), hook: trLines[0], body: [[...trLines.slice(1), ...trV, wallet != null ? `Kağıt kasa ${TR(wallet, 2)} USDT.` : ''].join(' ')], meaning: MEANING_TR },
+        tr: { title: clip(evs.length === 1 ? t1[0].head : `Bu saat: ${partsTR}`), hook: trLines[0], body: [[...trLines.slice(1), ...hc.tr, ...trV, wallet != null ? `Kağıt kasa ${TR(wallet, 2)} USDT.` : ''].join(' ')], meaning: MEANING_TR },
       });
     } catch (e) { out.feed = `feed hata ${e.message}`; }
     Object.assign(out, { events: evs.length, ...(await square('digest', id, text)) });
