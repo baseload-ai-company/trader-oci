@@ -1,5 +1,5 @@
 // Binance Square + Agent Resume: ONE combined post per hour (full run at :01) covering every real open/close since the
-// last post. English, human tone, emojis; per coin: long/short count, win rate %, profit factor and a performance label.
+// last post; a quiet hour still gets one post with the hour evaluation. English, human tone, emojis; per coin: long/short count, win rate %, profit factor and a performance label.
 // Square key: ~/.square-key (never logged). Agent Resume: feed.json on gh-pages, pulled by alibingul-dev.github.io
 // trader-feed workflow. End-of-day recap at the first run after Istanbul midnight. Never throws.
 const fs = require('fs');
@@ -271,17 +271,28 @@ async function hourly() {
       });
     } catch (e) { out.feed = `feed hata ${e.message}`; }
     Object.assign(out, { events: evs.length, ...(await square('digest', id, text)) });
-  } else if (eod) {
-    const text = [...eod.en, '#trading #crypto #papertrading #dailyrecap'].join('\n');
+  } else { // quiet hour: still one post with the hour evaluation (and the end-of-day recap after Istanbul midnight)
+    const hc = hourCheck(trades, now);
+    const open = db.read('pos.json', []);
+    const syms = [...new Set(open.map((p) => p.symbol))];
+    const recs = new Map(syms.map((sym) => [sym, record(sym, trades)]));
+    const verdicts = syms.map((sym) => recLine(recs.get(sym), false)).filter(Boolean);
+    const trV = syms.map((sym) => recLine(recs.get(sym), true)).filter(Boolean);
+    const wl = wallet != null ? `Paper wallet ${EN(wallet, 2)} USDT.` : 'Paper account.';
+    const head = pick(['Quiet hour on my paper account 🧘 No new trade, nothing closed.', 'No new trades this hour, just managing what\'s open 👀', 'Hour passed without a trade. Scanning, waiting, staying patient ⏳']);
+    const tags = syms.map((sym) => `$${coin(sym)}`).join(' ');
+    const body = eod ? [...eod.en, '', ...hc.en, '', ...verdicts] : [head, '', ...hc.en, '', ...verdicts, wl];
+    const text = [...body, `${tags ? `${tags} ` : ''}#trading #crypto #papertrading${eod ? ' #dailyrecap' : ''}`].join('\n').replace(/\n{3,}/g, '\n\n');
+    const id = eod ? `${eod.day}-trade-eod` : `${new Date(now).toISOString().slice(0, 10)}-trade-hour-${String(now).slice(-9)}`;
     try {
-      out.feed = await putFeed({ id: `${eod.day}-trade-eod`, topic: 'crypto', agent: AGENT, posted_at: iso(now), title: eod.en[0], hook: eod.en[1], body: [eod.en.slice(2).join(' ')],
-        meaning: 'What it means: one paper-trading day closed with real fees, slippage and funding counted; a single day says little, the running record says more.',
-        tags: ['Crypto', 'Daily recap', 'Paper trading'], sources: [{ title: 'Binance USDT-M Futures', url: 'https://www.binance.com/en/futures', date: eod.day }],
+      out.feed = await putFeed({ id, topic: 'crypto', agent: AGENT, posted_at: iso(now), title: clip(eod ? eod.en[0] : head), hook: eod ? eod.en[1] : hc.en[0], body: [[...(eod ? eod.en.slice(2) : []), ...(eod ? hc.en : []), ...verdicts, wl].join(' ')],
+        meaning: eod ? 'What it means: one paper-trading day closed with real fees, slippage and funding counted; a single day says little, the running record says more.' : MEANING,
+        tags: ['Crypto', ...(eod ? ['Daily recap'] : []), ...syms.map(coin), 'Paper trading'], sources: [{ title: 'Binance USDT-M Futures', url: 'https://www.binance.com/en/futures', date: new Date(now).toISOString().slice(0, 10) }],
         media: null, more: null, linkedin: null, reviewed: false, comments: [],
-        tr: { title: eod.tr[0], hook: eod.tr[1], body: [eod.tr.slice(2).join(' ')], meaning: 'Ne anlama geliyor: bir kağıt işlem günü kapandı; tek gün az şey söyler, birikmiş karne daha çok şey söyler.' } });
+        tr: { title: clip(eod ? eod.tr[0] : 'Sakin bir saat 🧘 Yeni işlem yok'), hook: eod ? eod.tr[1] : hc.tr[0], body: [[...(eod ? eod.tr.slice(2) : []), ...(eod ? hc.tr : []), ...trV, wallet != null ? `Kağıt kasa ${TR(wallet, 2)} USDT.` : ''].join(' ')], meaning: MEANING_TR } });
     } catch (e) { out.feed = `feed hata ${e.message}`; }
-    Object.assign(out, { eod: true, ...(await square('eod', eod.day, text)) });
-  } else out.skipped = 'bu saat olay yok';
+    Object.assign(out, { quiet: true, eod: !!eod, ...(await square(eod ? 'eod' : 'hour', id, text)) });
+  }
   const transient = out.code && !out.ok && (['FETCH', '10007', '220009'].includes(String(out.code)) || String(out.code).startsWith('HTTP 5'));
   if (!transient) db.write('square-cursor.json', { ts: evs.length ? evs[evs.length - 1].ts : cur.ts, day: today });
   return out;
