@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./store');
 const { hour } = require('./engine');
+const { publish } = require('./publish');
 
 const LOCK = path.join(db.DIR, 'hour.lock');
 
@@ -15,6 +16,7 @@ async function main() {
   try {
     const r = await hour();
     console.log(JSON.stringify(r));
+    try { console.log(new Date().toISOString(), 'dashboard:', await publish()); } catch (e) { console.error('dashboard HATA', e.message); }
   } finally {
     fs.rmSync(LOCK, { force: true });
   }
