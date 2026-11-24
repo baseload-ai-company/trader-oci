@@ -5,6 +5,7 @@ const MOM_L = [['ch24', '>', 0], ['ch4h', '>', 0], ['ch1h', '>', 0], ['rng', '>=
 const MOM_S = [['ch24', '<', 0], ['ch4h', '<', 0], ['ch1h', '<', 0], ['rng', '<=', 0.3], ['vr', '>=', 1.3], ['fund', '>=', -0.05], ['btc.ch1h', '<', 0.5]];
 const EX_STD = { sl_atr_k: 1, sl_min: 0.8, sl_max: 2.5, tp_mult: 3, max_hold_h: 12 };
 const EX_WIDE = { sl_atr_k: 1.5, sl_min: 1.2, sl_max: 4, tp_mult: 2, max_hold_h: 12 };
+const EX_ATR = { sl_atr_k: 1, sl_min: 0.8, sl_max: 12, tp_mult: 2, max_hold_h: 12 }; // stop follows real ATR; leverageFor() lowers lev to keep SL inside liq
 
 const STRATEGIES = [
   { id: 'v1', long: MOM_L, short: MOM_S, exit: EX_STD, cooldownH: 0,
@@ -23,6 +24,10 @@ const STRATEGIES = [
     desc: 'Alligator dizilimi (dudak>diş>çene) + 4s yön + hacim' },
   { id: 'L-bbbrk', long: [['bbp', '>=', 1], ['bbw', '>=', 2], ['vr', '>=', 1.5]], short: [['bbp', '<=', 0], ['bbw', '>=', 2], ['vr', '>=', 1.5]], exit: EX_STD, cooldownH: 12,
     desc: 'Bollinger(20,2) bant kırılımı + genişlik ≥2 % + hacim ≥1,5×' },
+  { id: 'L-atr', long: MOM_L, short: MOM_S, exit: EX_ATR, cooldownH: 12,
+    desc: 'v2 girişleri, gerçek ATR stopu: SL = ATR1h ×1 (0,8–12 %), TP = 2×SL; kaldıraç stopa göre düşer' },
+  { id: 'L-atrfit', long: [...MOM_L, ['atr1h', '<=', 2.5]], short: [...MOM_S, ['atr1h', '<=', 2.5]], exit: EX_STD, cooldownH: 12,
+    desc: 'v2 girişleri, yalnız ATR1h ≤ 2,5 % coinler (stop gürültünün içinde kalmasın)' },
 ];
 
 const OPS = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b };
