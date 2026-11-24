@@ -34,6 +34,7 @@ const ACTIONS = {
   hour: () => run(['src/hour.js']),
   publish: () => run(['src/publish.js']),
   cron: () => execFileSync('/bin/bash', ['deploy/bootstrap.sh'], { cwd: path.join(HOME, 'trader'), timeout: 5 * 60_000, encoding: 'utf8' }),
+  square: () => run(['-e', "require('./src/square').hourly().then((r) => console.log(JSON.stringify(r)))"]),
 };
 
 async function main() {
