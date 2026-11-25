@@ -144,10 +144,29 @@ async function squash(token) {
 
 // One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
 // alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
-const PAGES_VER = 'pages-v4';
+const PAGES_VER = 'pages-v5';
 const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
 const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
 const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
+
+// Claude's commentary above the "Strateji sürümleri" table (static, dated; TR/EN follows the page language toggle).
+const OPINION = `<style>#opn{margin:0 0 14px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.6}#opn ul{margin:6px 0 0;padding-left:18px}#opn li{margin:2px 0}#opn .op-h{font-weight:600}html[lang=en] #opn .op-tr,html:not([lang=en]) #opn .op-en{display:none}</style><div id="opn"><div class="op-tr"><div class="op-h">Genel görüş</div><div class="sub">Claude · 26 Kasım 2026 · en fazla 22 gölge işlem</div><ul>
+<li>Kenar yalnız momentum devamında. v2 türevleri (L-atr, v2, L-btc) PF 1,9 civarında; girişler aynı, fark stop ve hedefte.</li>
+<li>Aktif L-wide (PF 1,46), aynı girişli L-atr'nin (PF 1,92) gerisinde. Dar ATR stopu şu an daha verimli.</li>
+<li>Ters test sinyali doğruluyor. Ayna stratejisi (v2'nin tersi) PF 0,13 ile en kötü sonuç.</li>
+<li>BTC filtresi bilgi katmıyor. L-btc, v2 ile işlem işlem aynı; eleyeceği sinyal çıkmadı.</li>
+<li>Klasik indikatör aileleri çalışmadı. RSI geri çekilme, Alligator, çoklu zaman dilimi, 24s kırılım, pin bar ve Bollinger PF 0,5–0,8 ile emekli.</li>
+<li>Supertrend zayıf. Dönüş sürümü 6 işlemde PF 1,18, fade sürümü ilk işlemde zarar. Maliyeti taşıyacak kenar yok; emeklilik adayı.</li>
+<li>Yeni fikirlerden yalnız yutan mum umut veriyor: PF 2,62, ama 5 işlemle karar erken.</li>
+<li>Örneklem küçük. Hiçbir strateji 30 işleme ulaşmadı; bu tablo hipotezdir, kanıt değil.</li></ul></div><div class="op-en"><div class="op-h">Overall view</div><div class="sub">Claude · 26 Nov 2026 · up to 22 shadow trades</div><ul>
+<li>The only edge is momentum continuation. v2 variants (L-atr, v2, L-btc) sit near PF 1.9; same entries, different stop and target.</li>
+<li>Active L-wide (PF 1.46) trails L-atr (PF 1.92), which uses the same entries. The tighter ATR stop is more efficient for now.</li>
+<li>The inverse test confirms the signal. The mirror strategy (v2 reversed) is the worst result at PF 0.13.</li>
+<li>The BTC filter adds nothing. L-btc matches v2 trade for trade; it has not filtered a single signal.</li>
+<li>Classic indicator families failed. RSI pullback, Alligator, multi-timeframe, 24h breakout, pin bar and Bollinger retired at PF 0.5–0.8.</li>
+<li>Supertrend is weak. The flip version shows PF 1.18 over 6 trades; the fade version lost its first trade. No edge large enough to cover costs; a retirement candidate.</li>
+<li>Among new ideas only the engulfing candle looks promising: PF 2.62, but 5 trades is too early to judge.</li>
+<li>The sample is small. No strategy has reached 30 trades; treat this table as hypotheses, not proof.</li></ul></div></div>`;
 
 // Tried-strategies table at the bottom of the "Strateji" view; fills itself from data.json.lab_summary.
 const TRIED_SECTION = '<section class="card" id="sec-denenen" data-view="strateji"><h2>Denenen stratejiler</h2><div class="sub" style="margin:-4px 0 10px">Laboratuvarda denenen her strateji: gölge işlemlerin PnL (USDT), BSR (kazanan işlem oranı) ve WSR (kazançların toplam mutlak PnL içindeki payı). Ölçüt: WSR &gt; BSR.</div><div class="scroll"><table id="tTried"></table></div></section>';
@@ -183,7 +202,7 @@ async function ensureAssets(token) {
       let html = buf.toString('utf8');
       if (!html.includes(CHART_OLD)) return ' · index.html grafik bloğu bulunamadı, sayfa güncellenmedi';
       html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu 5 dakikada bir günceller')}")
-        .replace('</main>', `${TRIED_SECTION}\n</main>`).replace('</body>', `${TRIED_SCRIPT}\n</body>`);
+        .replace('<h2>Strateji sürümleri</h2>', `<h2>Strateji sürümleri</h2>${OPINION}`).replace('</main>', `${TRIED_SECTION}\n</main>`).replace('</body>', `${TRIED_SCRIPT}\n</body>`);
       buf = Buffer.from(html, 'utf8');
     }
     await putFile(token, p, buf, `page ${p}`);
