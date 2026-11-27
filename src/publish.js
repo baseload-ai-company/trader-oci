@@ -42,7 +42,7 @@ function triedSummary(strades, s) {
 
 const REPO = 'baseload-ai-company/trader-oci';
 const BRANCH = 'gh-pages';
-const CFG = { fee: 0.0005, slip: 0.0005, mmr: 0.005, maxLev: 20, startWallet: 10, baseNotional: 6, maxOpen: 3, minQv_musdt: 50, topN: 10 };
+const CFG = { fee: 0.0005, slip: 0.0005, mmr: 0.005, maxLev: 20, startWallet: 10, baseNotional: 6, maxOpen: 10, minQv_musdt: 50, topN: 10 };
 const rd = (x, d = 4) => (x == null || !isFinite(x) ? x : Math.round(x * 10 ** d) / 10 ** d);
 const H = 3.6e6;
 
@@ -62,9 +62,9 @@ function compactPos(p, now) {
 function runSummary(r) {
   const saw = `${r.movers} hareketli coin tarandı; ${r.open} açık gerçek, ${r.shadowOpen} açık gölge pozisyon.`;
   const did = [
-    r.opened.length ? `Açılan: ${r.opened.join('; ')}` : r.open >= 3 ? 'Yeni pozisyon yok: 3 pozisyon sınırı dolu.' : 'Pozisyon bulunmadı.',
+    r.opened.length ? `Açılan: ${r.opened.join('; ')}` : r.open >= CFG.maxOpen ? `Yeni pozisyon yok: ${CFG.maxOpen} pozisyon sınırı dolu.` : 'Pozisyon bulunmadı.',
     r.closed.length ? `Kapanan: ${r.closed.join('; ')}` : '',
-    r.eval ? `6 saatlik değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (PF ${r.eval.pf}, ${r.eval.n} işlem)`}` : '',
+    r.eval ? `İşlem sayısı bazlı değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (PF ${r.eval.pf}, ${r.eval.n} işlem)`}` : '',
   ].filter(Boolean).join(' ');
   const exp = `Kural motoru: aktif strateji ${r.active}; SL/TP 1 dakikalık mumlarla izleniyor.`;
   return `Gördüm: ${saw}\nKarar: ${did}\nBeklenti: ${exp}`;
@@ -99,10 +99,12 @@ async function build() {
   const open = db.read('pos.json', []).map((p) => compactPos(p, now));
   const sopen = db.read('spos.json', []).map((p) => ({ ...compactPos(p, now), lab: true }));
   const runs = db.lines('runs.jsonl').slice(-288);
-  const equity = db.lines('equity.jsonl').slice(-2000);
+  // hourly points + one live point (wallet + open uPnL) so the dashboard never shows a stale equity
+  const liveEq = (s.wallet || 0) + open.reduce((a, p) => a + (p.upnl_usdt || 0), 0);
+  const equity = [...db.lines('equity.jsonl').slice(-1999), { ts: now, equity: Math.round(liveEq * 1e4) / 1e4, live: true }];
   const strategies = [{ version: 'v1', at: s.createdAt, rules: STRATEGIES.find((x) => x.id === 'v1').desc, reason: 'Oracle Frankfurt üzerinde yeni sistemin başlangıç stratejisi (kural motoru, saatlik).' },
     ...(s.history || []).map((h) => ({ version: h.to, at: h.t, rules: (STRATEGIES.find((x) => x.id === h.to) || {}).desc || h.to,
-      reason: `6 saatlik kural: ${h.from} yerine geçti (PF ${h.pf}, ${h.n} gölge işlem).` }))];
+      reason: `İşlem sayısı kuralı: ${h.from} yerine geçti (PF ${h.pf}, ${h.n} gölge işlem).` }))];
   const skipped = strades.slice(-1000);
   const chartItems = [...open, ...sopen.slice(-30)].map((p) => ({ sym: p.sym, openedAt: p.openedAt }))
     .concat([...trades.slice(-20), ...skipped.slice(-30)].map((t) => ({ sym: t.symbol, openedAt: t.openedAt, closedAt: t.closedAt })));
