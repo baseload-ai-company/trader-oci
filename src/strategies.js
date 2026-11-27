@@ -8,6 +8,7 @@ const MOM_S = [['ch24', '<', 0], ['ch4h', '<', 0], ['ch1h', '<', 0], ['rng', '<=
 const EX_STD = { sl_atr_k: 1, sl_min: 0.8, sl_max: 2.5, tp_mult: 3, max_hold_h: 12 };
 const EX_WIDE = { sl_atr_k: 1.5, sl_min: 1.2, sl_max: 4, tp_mult: 2, max_hold_h: 12 };
 const EX_ATR15 = { sl_atr_k: 1.5, sl_min: 1.5, sl_max: 15, tp_mult: 1.5, max_hold_h: 8 }; // stop outside 1h noise, nearer target; lev follows the stop
+const EX_NEAR = { sl_atr_k: 1, sl_min: 0.8, sl_max: 2.5, tp_mult: 1.5, max_hold_h: 8 }; // nearer target: losses that saw half the TP then reversed
 const EX_ATR = { sl_atr_k: 1, sl_min: 0.8, sl_max: 12, tp_mult: 2, max_hold_h: 12 }; // stop follows real ATR; leverageFor() lowers lev to keep SL inside liq
 
 const STRATEGIES = [
@@ -71,6 +72,14 @@ const STRATEGIES = [
     desc: 'v2 girişleri, ATR stopu: SL = ATR1h ×1,5 (1,5–15 %), TP = 1,5×SL, 8 saat; kaldıraç stopa göre düşer' },
   { id: 'L-engatr', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_ATR15, cooldownH: 12,
     desc: 'L-engulf girişleri, ATR stopu: SL = ATR1h ×1,5 (1,5–15 %), TP = 1,5×SL, 8 saat' },
+  // [2026-11-27 21:00] Lab refill (3 slots): L-engulf losses saw half the TP then reversed (45.5 %) → nearer TP;
+  // L-btc losses stopped within 15 min (53.3 %) → ATR stop outside noise; engulf late entries → RSI not stretched.
+  { id: 'L-engnear', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_NEAR, cooldownH: 12,
+    desc: 'L-engulf girişleri, yakın hedef: SL = ATR1h ×1 (0,8–2,5 %), TP = 1,5×SL, 8 saat' },
+  { id: 'L-btcatr', long: [...MOM_L, ['btc.ch1h', '>', 0]], short: [...MOM_S, ['btc.ch1h', '<', 0]], exit: EX_ATR15, cooldownH: 12,
+    desc: 'L-btc girişleri, ATR stopu: SL = ATR1h ×1,5 (1,5–15 %), TP = 1,5×SL, 8 saat; kaldıraç stopa göre düşer' },
+  { id: 'L-engrsi', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2], ['rsi', '>=', 40], ['rsi', '<=', 65]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2], ['rsi', '>=', 35], ['rsi', '<=', 60]], exit: EX_STD, cooldownH: 12,
+    desc: 'L-engulf girişleri, RSI(14) 40–65 (short 35–60): uzamış harekette geç girişi ele' },
 ];
 
 const OPS = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b };

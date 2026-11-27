@@ -28,4 +28,7 @@ module.exports = {
   'L-impulse': 'Trend yönündeki hacimli tek saatlik itkinin devamını yakalamak.',
   'L-atr15': 'Stopu 1 saatlik gürültünün dışına koyup yakın hedefle momentumdan pay almak.',
   'L-engatr': 'En iyi giriş ailesini (yutan mum) gürültüye dayanıklı ATR stopuyla denemek.',
+  'L-engnear': 'Yutan mum kayıplarının yarısı hedefin yarısını görüp döndü; hedefi yaklaştırıp kârı almak.',
+  'L-btcatr': 'L-btc kayıplarının yarısı 15 dakikada stop oldu; stopu ATR ile gürültünün dışına koymak.',
+  'L-engrsi': 'Yutan mumu yalnız RSI aşırı değilken almak; uzamış harekete geç girişi elemek.',
 };
