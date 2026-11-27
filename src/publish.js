@@ -64,7 +64,7 @@ function runSummary(r) {
   const did = [
     r.opened.length ? `Açılan: ${r.opened.join('; ')}` : r.open >= CFG.maxOpen ? `Yeni pozisyon yok: ${CFG.maxOpen} pozisyon sınırı dolu.` : 'Pozisyon bulunmadı.',
     r.closed.length ? `Kapanan: ${r.closed.join('; ')}` : '',
-    r.eval ? `İşlem sayısı bazlı değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (PF ${r.eval.pf}, ${r.eval.n} işlem)`}` : '',
+    r.eval ? `İşlem sayısı bazlı değerlendirme: ${typeof r.eval === 'string' ? r.eval : `${r.eval.from} → ${r.eval.to} (EV ${r.eval.ev} USDT/işlem, ${r.eval.n} işlem)`}` : '',
   ].filter(Boolean).join(' ');
   const exp = `Kural motoru: aktif strateji ${r.active}; SL/TP 1 dakikalık mumlarla izleniyor.`;
   return `Gördüm: ${saw}\nKarar: ${did}\nBeklenti: ${exp}`;
@@ -104,7 +104,7 @@ async function build() {
   const equity = [...db.lines('equity.jsonl').slice(-1999), { ts: now, equity: Math.round(liveEq * 1e4) / 1e4, live: true }];
   const strategies = [{ version: 'v1', at: s.createdAt, rules: STRATEGIES.find((x) => x.id === 'v1').desc, reason: 'Oracle Frankfurt üzerinde yeni sistemin başlangıç stratejisi (kural motoru, saatlik).' },
     ...(s.history || []).map((h) => ({ version: h.to, at: h.t, rules: (STRATEGIES.find((x) => x.id === h.to) || {}).desc || h.to,
-      reason: `İşlem sayısı kuralı: ${h.from} yerine geçti (PF ${h.pf}, ${h.n} gölge işlem).` }))];
+      reason: `EV kuralı: ${h.from} yerine geçti (${h.ev != null ? `EV ${h.ev} USDT/işlem, ` : ''}PF ${h.pf}, ${h.n} gölge işlem).` }))];
   const skipped = strades.slice(-1000);
   const chartItems = [...open, ...sopen.slice(-30)].map((p) => ({ sym: p.sym, openedAt: p.openedAt }))
     .concat([...trades.slice(-20), ...skipped.slice(-30)].map((t) => ({ sym: t.symbol, openedAt: t.openedAt, closedAt: t.closedAt })));

@@ -17,6 +17,7 @@ const CFG = {
   minQv: 50e6,
   topN: 10,
   switchMinN: 10, switchPF: 1.3, switchEdge: 0.3, // trade-count switch rule
+  evWindow: 20, evEdge: 0.02, // EV switch rule: last 20 shadow trades, candidate EV must beat active by 0.02 USDT/trade
   evalEveryTrades: 10, // evaluate after every 10 closed trades (real + lab), not on a clock
 };
 const MIN = 60_000;
@@ -214,36 +215,37 @@ function stats(trades) {
 }
 
 function evaluate(s, now) {
-  const since = s.activeSince;
-  const sh = db.lines('strades.jsonl').filter((t) => t.openedAt >= since);
-  const by = Object.fromEntries(STRATEGIES.map((x) => [x.id, stats(sh.filter((t) => t.strategy === x.id))]));
-  const act = by[s.active];
-  const note = { t: now, active: s.active, stats: by, trigger: `${s.closedSinceEval || 0} closed trades` };
-  if (s.probation) { // first 10 real trades after a switch must keep PF >= 1, else the bar goes back to 20
+  // EV rule (Ali, 27 Nov: "EV'si iyi olsun gerisi önemli değil"): each strategy is scored by EV = net USDT per trade over
+  // its last CFG.evWindow closed shadow trades (all time, so a strategy keeps its record across switches). A candidate
+  // takes over when it has >= minN trades, EV > 0 and EV >= active EV + CFG.evEdge. PF is reported, not used.
+  if (!s.evRule) { s.evRule = true; s.switchMinN = CFG.switchMinN; } // one-time: the 20-trade bar came from the old PF probation
+  const sh = db.lines('strades.jsonl').sort((x, y) => x.closedAt - y.closedAt);
+  const by = Object.fromEntries(STRATEGIES.map((x) => {
+    const t = sh.filter((y) => y.strategy === x.id).slice(-CFG.evWindow);
+    const st = stats(t);
+    return [x.id, { ...st, ev: t.length ? rd(st.net / t.length, 4) : 0 }];
+  }));
+  const act = by[s.active] || { n: 0, ev: 0 };
+  const note = { t: now, active: s.active, stats: by, trigger: `${s.closedSinceEval || 0} closed trades`, rule: 'EV' };
+  if (s.probation) { // first 10 real trades after a switch must keep EV >= 0, else the candidate bar goes back to 20 trades
     const rt = db.lines('trades.jsonl').filter((t) => t.openedAt >= s.probation.since);
     if (rt.length >= 10) {
       const p = stats(rt.slice(0, 10));
-      s.switchMinN = p.pf < 1 ? 20 : CFG.switchMinN;
-      note.probation = { pf: p.pf, minN: s.switchMinN };
+      s.switchMinN = p.net < 0 ? 20 : CFG.switchMinN;
+      note.probation = { ev: rd(p.net / 10, 4), minN: s.switchMinN };
       s.probation = null;
     }
   }
-  // Failing incumbent (Ali, 27 Nov: "V2 kötü giderken nasıl hala en iyi strateji"): once the active strategy's real book
-  // has >= 20 trades with PF < 1, a candidate no longer needs PF >= 1.3 — it needs >= 10 trades and PF >= active + edge.
-  const real = stats(db.lines('trades.jsonl').filter((t) => t.openedAt >= since && t.strategy === s.active));
-  const failing = real.n >= 20 && real.pf < 1;
-  const minN = failing ? CFG.switchMinN : s.switchMinN, minPF = failing ? 0 : CFG.switchPF;
-  note.failing = failing; note.activeReal = real;
   const ranked = Object.entries(by)
-    .filter(([id, x]) => id !== s.active && x.n >= minN && x.pf >= minPF && x.pf >= act.pf + CFG.switchEdge)
-    .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net);
+    .filter(([id, x]) => id !== s.active && x.n >= s.switchMinN && x.ev > 0 && x.ev >= act.ev + CFG.evEdge)
+    .sort((a, b) => b[1].ev - a[1].ev || b[1].n - a[1].n);
   const best = ranked[0];
-  const tied = best ? ranked.filter(([, x]) => x.pf === best[1].pf && x.net === best[1].net).map(([id]) => id) : [];
-  if (tied.length > 1) { // tie on PF and net: no switch, wait until the results separate
-    note.tie = { ids: tied, pf: best[1].pf, net: best[1].net, n: best[1].n };
+  const tied = best ? ranked.filter(([, x]) => x.ev === best[1].ev && x.n === best[1].n).map(([id]) => id) : [];
+  if (tied.length > 1) { // tie: no switch, wait until the results separate
+    note.tie = { ids: tied, ev: best[1].ev, n: best[1].n };
   } else if (best) {
-    note.switch = { from: s.active, to: best[0], pf: best[1].pf, n: best[1].n, activePf: act.pf };
-    s.history.push({ t: now, from: s.active, to: best[0], pf: best[1].pf, n: best[1].n });
+    note.switch = { from: s.active, to: best[0], ev: best[1].ev, pf: best[1].pf, n: best[1].n, activeEv: act.ev };
+    s.history.push({ t: now, from: s.active, to: best[0], ev: best[1].ev, pf: best[1].pf, n: best[1].n });
     s.active = best[0];
     s.activeSince = now;
     s.probation = { since: now };
