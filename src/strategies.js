@@ -7,6 +7,7 @@ const MOM_L = [['ch24', '>', 0], ['ch4h', '>', 0], ['ch1h', '>', 0], ['rng', '>=
 const MOM_S = [['ch24', '<', 0], ['ch4h', '<', 0], ['ch1h', '<', 0], ['rng', '<=', 0.3], ['vr', '>=', 1.3], ['fund', '>=', -0.05], ['btc.ch1h', '<', 0.5]];
 const EX_STD = { sl_atr_k: 1, sl_min: 0.8, sl_max: 2.5, tp_mult: 3, max_hold_h: 12 };
 const EX_WIDE = { sl_atr_k: 1.5, sl_min: 1.2, sl_max: 4, tp_mult: 2, max_hold_h: 12 };
+const EX_ATR15 = { sl_atr_k: 1.5, sl_min: 1.5, sl_max: 15, tp_mult: 1.5, max_hold_h: 8 }; // stop outside 1h noise, nearer target; lev follows the stop
 const EX_ATR = { sl_atr_k: 1, sl_min: 0.8, sl_max: 12, tp_mult: 2, max_hold_h: 12 }; // stop follows real ATR; leverageFor() lowers lev to keep SL inside liq
 
 const STRATEGIES = [
@@ -64,6 +65,12 @@ const STRATEGIES = [
     desc: 'Çoklu zaman dilimi (hafif): 4s EMA9 yönünde 1s EMA9/21 kesişimi + EMA50' },
   { id: 'L-impulse', long: [['ch1h', '>=', 1], ['vr', '>=', 2], ['ema50', '==', 1], ['rsi', '<=', 70]], short: [['ch1h', '<=', -1], ['vr', '>=', 2], ['ema50', '==', -1], ['rsi', '>=', 30]], exit: EX_STD, cooldownH: 12,
     desc: 'Hacimli itki: son saat ≥1 % + hacim ≥2× trend yönünde, RSI aşırı değil' },
+  // [2026-11-27] Stop-noise test: 8 of 22 real v2 losses were stopped within 5 min with a fixed 2.5 % stop on coins whose
+  // ATR1h is 4–11 %. Stop = ATR1h ×1.5 (1.5–15 %), TP = 1.5×SL, 8 h. Replaces retired-by-hand L-stfade and L-atrfit.
+  { id: 'L-atr15', long: MOM_L, short: MOM_S, exit: EX_ATR15, cooldownH: 12,
+    desc: 'v2 girişleri, ATR stopu: SL = ATR1h ×1,5 (1,5–15 %), TP = 1,5×SL, 8 saat; kaldıraç stopa göre düşer' },
+  { id: 'L-engatr', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_ATR15, cooldownH: 12,
+    desc: 'L-engulf girişleri, ATR stopu: SL = ATR1h ×1,5 (1,5–15 %), TP = 1,5×SL, 8 saat' },
 ];
 
 const OPS = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b };

@@ -5,7 +5,9 @@ const db = require('./store');
 
 const RULE = { maxLosers: 7, pf: 1.0, cap: 15 };
 
-const retiredIds = () => Object.keys(db.read('retired.json', {}));
+// Retired by hand to keep the lab at RULE.cap (27 Nov: L-stfade PF 0, L-atrfit PF 0.24 — slots go to L-atr15 / L-engatr).
+const MANUAL = ['L-stfade', 'L-atrfit'];
+const retiredIds = () => [...new Set([...Object.keys(db.read('retired.json', {})), ...MANUAL])];
 
 function retire(active) {
   const ret = db.read('retired.json', {});

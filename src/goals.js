@@ -26,4 +26,6 @@ module.exports = {
   'L-macdema': 'MACD momentumu teyit ederken EMA kesişimiyle trend başlangıcını yakalamak.',
   'L-tfema': 'Sıkı MTF filtresi yerine hafif 4s teyidiyle EMA kesişimi.',
   'L-impulse': 'Trend yönündeki hacimli tek saatlik itkinin devamını yakalamak.',
+  'L-atr15': 'Stopu 1 saatlik gürültünün dışına koyup yakın hedefle momentumdan pay almak.',
+  'L-engatr': 'En iyi giriş ailesini (yutan mum) gürültüye dayanıklı ATR stopuyla denemek.',
 };
