@@ -48,6 +48,22 @@ const STRATEGIES = [
     desc: 'Çoklu zaman dilimi: 4s trend + 4s ardışık yön + 1s EMA50 aynı yönde, RSI aşırı değil' },
   { id: 'L-mtfpa', long: [['tf4h', '==', 1], ['engulf', '==', 1]], short: [['tf4h', '==', -1], ['engulf', '==', -1]], exit: EX_STD, cooldownH: 12,
     desc: 'Çoklu zaman dilimi + price action: 4s trend yönünde 1s yutan mum' },
+  // [2026-11-27] Lab refill: 7 slots open after 11 retirements. Built from what survived (trend-side entries with
+  // confirmation: engulf+EMA50, EMA cross, BTC filter, wide stop) — breakout, fade and strict-MTF ideas are not repeated.
+  { id: 'L-engwide', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'L-engulf girişleri, geniş stop: SL = ATR1h ×1,5 (1,2–4 %), TP = 2×SL' },
+  { id: 'L-engbtc', long: [['engulf', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.2], ['btc.ch1h', '>', 0]], short: [['engulf', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.2], ['btc.ch1h', '<', 0]], exit: EX_STD, cooldownH: 12,
+    desc: 'L-engulf girişleri + BTC son saat aynı yönde' },
+  { id: 'L-btcwide', long: [...MOM_L, ['btc.ch1h', '>', 0]], short: [...MOM_S, ['btc.ch1h', '<', 0]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'L-btc girişleri, geniş stop: SL = ATR1h ×1,5 (1,2–4 %), TP = 2×SL' },
+  { id: 'L-emat', long: [['emaX', '==', 1], ['ema50', '==', 1], ['vr', '>=', 1.3]], short: [['emaX', '==', -1], ['ema50', '==', -1], ['vr', '>=', 1.3]], exit: EX_STD, cooldownH: 12,
+    desc: 'EMA9/21 kesişimi yalnız EMA50 trendi yönünde + hacim ≥1,3×' },
+  { id: 'L-macdema', long: [['macdH', '>', 0], ['emaX', '==', 1], ['vr', '>=', 1.2]], short: [['macdH', '<', 0], ['emaX', '==', -1], ['vr', '>=', 1.2]], exit: EX_WIDE, cooldownH: 12,
+    desc: 'EMA9/21 kesişimi + MACD histogram aynı tarafta + hacim ≥1,2×; geniş stop' },
+  { id: 'L-tfema', long: [['tf4h', '==', 1], ['emaX', '==', 1], ['ema50', '==', 1]], short: [['tf4h', '==', -1], ['emaX', '==', -1], ['ema50', '==', -1]], exit: EX_STD, cooldownH: 12,
+    desc: 'Çoklu zaman dilimi (hafif): 4s EMA9 yönünde 1s EMA9/21 kesişimi + EMA50' },
+  { id: 'L-impulse', long: [['ch1h', '>=', 1], ['vr', '>=', 2], ['ema50', '==', 1], ['rsi', '<=', 70]], short: [['ch1h', '<=', -1], ['vr', '>=', 2], ['ema50', '==', -1], ['rsi', '>=', 30]], exit: EX_STD, cooldownH: 12,
+    desc: 'Hacimli itki: son saat ≥1 % + hacim ≥2× trend yönünde, RSI aşırı değil' },
 ];
 
 const OPS = { '>': (a, b) => a > b, '>=': (a, b) => a >= b, '<': (a, b) => a < b, '<=': (a, b) => a <= b, '==': (a, b) => a === b };

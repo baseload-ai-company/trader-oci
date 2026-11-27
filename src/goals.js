@@ -19,4 +19,11 @@ module.exports = {
   'L-brk': 'Price action: 24 saatlik zirve/dip kırılımında hacimli devamı yakalamak.',
   'L-mtf': 'Çoklu zaman dilimi: 4 saatlik trend 1 saatlikle aynı yöndeyken girmek.',
   'L-mtfpa': 'Çoklu zaman dilimi + price action: 4 saatlik trend yönündeki yutan mum.',
+  'L-engwide': 'Laboratuvarın lideri yutan mum girişine geniş stopla nefes aldırmak.',
+  'L-engbtc': 'Yutan mum sinyalini yalnız BTC rüzgârı arkadayken almak.',
+  'L-btcwide': 'Kârda kalan iki fikri birleştirmek: BTC filtresi + geniş stop.',
+  'L-emat': 'EMA kesişimini yalnız ana trend yönünde alıp ters sinyalleri elemek.',
+  'L-macdema': 'MACD momentumu teyit ederken EMA kesişimiyle trend başlangıcını yakalamak.',
+  'L-tfema': 'Sıkı MTF filtresi yerine hafif 4s teyidiyle EMA kesişimi.',
+  'L-impulse': 'Trend yönündeki hacimli tek saatlik itkinin devamını yakalamak.',
 };
