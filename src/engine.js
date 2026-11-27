@@ -228,8 +228,14 @@ function evaluate(s, now) {
       s.probation = null;
     }
   }
+  // Failing incumbent (Ali, 27 Nov: "V2 kötü giderken nasıl hala en iyi strateji"): once the active strategy's real book
+  // has >= 20 trades with PF < 1, a candidate no longer needs PF >= 1.3 — it needs >= 10 trades and PF >= active + edge.
+  const real = stats(db.lines('trades.jsonl').filter((t) => t.openedAt >= since && t.strategy === s.active));
+  const failing = real.n >= 20 && real.pf < 1;
+  const minN = failing ? CFG.switchMinN : s.switchMinN, minPF = failing ? 0 : CFG.switchPF;
+  note.failing = failing; note.activeReal = real;
   const ranked = Object.entries(by)
-    .filter(([id, x]) => id !== s.active && x.n >= s.switchMinN && x.pf >= CFG.switchPF && x.pf >= act.pf + CFG.switchEdge)
+    .filter(([id, x]) => id !== s.active && x.n >= minN && x.pf >= minPF && x.pf >= act.pf + CFG.switchEdge)
     .sort((a, b) => b[1].pf - a[1].pf || b[1].net - a[1].net);
   const best = ranked[0];
   const tied = best ? ranked.filter(([, x]) => x.pf === best[1].pf && x.net === best[1].net).map(([id]) => id) : [];
