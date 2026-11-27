@@ -13,7 +13,7 @@ const CFG = {
   maxLev: 20,
   startWallet: 10,
   baseNotional: 6,
-  maxOpen: 3,
+  maxOpen: 10, // Ali: up to 10 parallel positions (21 Nov). 3 sent 24 v2 signals (PF 1.64) to shadow only (27 Nov review)
   minQv: 50e6,
   topN: 10,
   switchMinN: 10, switchPF: 1.3, switchEdge: 0.3, // trade-count switch rule
