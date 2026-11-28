@@ -1,0 +1,7 @@
+{
+ "id": "eval-20261127-1650",
+ "action": "eval",
+ "at": "2026-11-27T16:50:02.114Z",
+ "ok": true,
+ "output": "aktif (önce): v2 · aktif (sonra): L-engulf · eşik n >= 10\nGEÇİŞ: {\"from\":\"v2\",\"to\":\"L-engulf\",\"ev\":0.018,\"pf\":1.18,\"n\":15,\"activeEv\":-0.0689}\nv2: n 20 · PF 0.49 · WR 15 % · net -1.3781 USDT\nL-btc: n 20 · PF 0.83 · WR 25 % · net -0.4495 USDT\nL-emax: n 8 · PF 0.92 · WR 25 % · net -0.0727 USDT\nL-engulf: n 15 · PF 1.18 · WR 27 % · net 0.2693 USDT\nL-engwide: n 2 · PF 1.89 · WR 50 % · net 0.2216 USDT\nL-engbtc: n 2 · PF 2.77 · WR 50 % · net 0.2814 USDT\nL-btcwide: n 3 · PF 99 · WR 100 % · net 1.4138 USDT\nL-emat: n 1 · PF 0 · WR 0 % · net -0.1588 USDT\nL-macdema: n 1 · PF 0 · WR 0 % · net -0.2488 USDT\nL-tfema: n 1 · PF 0 · WR 0 % · net -0.1588 USDT\nL-impulse: n 2 · PF 2.42 · WR 50 % · net 0.2592 USDT\nL-atr15: n 1 · PF 99 · WR 100 % · net 1.3397 USDT\nL-engatr: n 1 · PF 99 · WR 100 % · net 1.3397 USDT"
+}
