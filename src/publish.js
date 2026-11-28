@@ -105,7 +105,12 @@ async function build() {
   const strategies = [{ version: 'v1', at: s.createdAt, rules: STRATEGIES.find((x) => x.id === 'v1').desc, reason: 'Oracle Frankfurt üzerinde yeni sistemin başlangıç stratejisi (kural motoru, saatlik).' },
     ...(s.history || []).map((h) => ({ version: h.to, at: h.t, rules: (STRATEGIES.find((x) => x.id === h.to) || {}).desc || h.to,
       reason: `EV kuralı: ${h.from} yerine geçti (${h.ev != null ? `EV ${h.ev} USDT/işlem, ` : ''}PF ${h.pf}, ${h.n} gölge işlem).` }))];
-  const skipped = strades.slice(-1000);
+  // EV per strategy, same as engine.evaluate(): net USDT per trade over the last 20 closed shadow trades.
+  const evBy = {};
+  for (const t of [...strades].sort((x, y) => x.closedAt - y.closedAt)) (evBy[t.strategy] = evBy[t.strategy] || []).push(t.net);
+  for (const k of Object.keys(evBy)) { const w = evBy[k].slice(-20); evBy[k] = Math.round(w.reduce((a, x) => a + x, 0) / w.length * 1e4) / 1e4; }
+  for (const p of sopen) p.ev = evBy[p.version] ?? null;
+  const skipped = strades.slice(-1000).map((t) => ({ ...t, ev: evBy[t.strategy] ?? null }));
   const chartItems = [...open, ...sopen.slice(-30)].map((p) => ({ sym: p.sym, openedAt: p.openedAt }))
     .concat([...trades.slice(-20), ...skipped.slice(-30)].map((t) => ({ sym: t.symbol, openedAt: t.openedAt, closedAt: t.closedAt })));
   return {
@@ -146,7 +151,7 @@ async function squash(token) {
 
 // One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
 // alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
-const PAGES_VER = 'pages-v5';
+const PAGES_VER = 'pages-v6';
 const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
 const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
 const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
@@ -205,6 +210,16 @@ async function ensureAssets(token) {
       if (!html.includes(CHART_OLD)) return ' · index.html grafik bloğu bulunamadı, sayfa güncellenmedi';
       html = html.replace(CHART_OLD, CHART_NEW).replace("${T('kayıt tutulmaz, Binance’ten anlık çekilir')}", "${T('sunucu 5 dakikada bir günceller')}")
         .replace('<h2>Strateji sürümleri</h2>', `<h2>Strateji sürümleri</h2>${OPINION}`).replace('</main>', `${TRIED_SECTION}\n</main>`).replace('</body>', `${TRIED_SCRIPT}\n</body>`);
+      // Pas geçilenler: strateji EV sütunu (Ali, 28 Kas)
+      const EVH = (h) => `${h}<th>EV (USDT/işlem)</th>`;
+      const evC = (v) => `<td class="mono \${cls(${v}.ev)}">\${${v}.ev == null ? '—' : sg(${v}.ev, 4)}</td>`;
+      const PAS = [["<th>Açılsaydı PnL (USDT)</th>", EVH("<th>Açılsaydı PnL (USDT)</th>")],
+        ["<th>Açılsaydı net (USDT)</th>", EVH("<th>Açılsaydı net (USDT)</th>")],
+        ["<td class=\"mono ${cls(p.upnl_usdt)}\">${sg(p.upnl_usdt, 4)}</td><td class=\"mono\">${f(p.age_h, 1)}</td><td>${sup(p)}</td><td class=\"raw\" style=\"white-space:normal;max-width:420px\">${esc(rz(p.reason))}</td></tr>`).join('') : '<tr><td colspan=\"11\" class=\"sub\">İzlenen pas yok",
+          "<td class=\"mono ${cls(p.upnl_usdt)}\">${sg(p.upnl_usdt, 4)}</td>" + evC('p') + "<td class=\"mono\">${f(p.age_h, 1)}</td><td>${sup(p)}</td><td class=\"raw\" style=\"white-space:normal;max-width:420px\">${esc(rz(p.reason))}</td></tr>`).join('') : '<tr><td colspan=\"12\" class=\"sub\">İzlenen pas yok"],
+        ["<td class=\"mono ${cls(t.net)}\">${sg(t.net, 4)}</td><td class=\"${t.net <= 0", "<td class=\"mono ${cls(t.net)}\">${sg(t.net, 4)}</td>" + evC('t') + "<td class=\"${t.net <= 0"],
+        ['colspan="11" class="sub">Henüz sonuçlanan pas yok', 'colspan="12" class="sub">Henüz sonuçlanan pas yok']];
+      for (const [a, b] of PAS) { if (html.split(a).length !== 2) return ` · pas EV yaması tutmadı: ${a.slice(0, 40)}`; html = html.replace(a, () => b); }
       buf = Buffer.from(html, 'utf8');
     }
     await putFile(token, p, buf, `page ${p}`);
