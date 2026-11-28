@@ -12,7 +12,7 @@ const GOALS = require('./goals');
 // Tried-strategies table: PnL, BSR (win count share) and WSR (|PnL| share of winners), purpose and a data-driven reason.
 function triedSummary(strades, s) {
   const pct = (x) => Math.round(x * 1000) / 10;
-  return STRATEGIES.map((L) => {
+  return STRATEGIES.map((L, i) => {
     const t = strades.filter((x) => x.strategy === L.id);
     const n = t.length, win = t.filter((x) => x.net > 0), los = t.filter((x) => x.net <= 0);
     const gw = win.reduce((a, x) => a + x.net, 0), gl = -los.reduce((a, x) => a + x.net, 0);
@@ -35,7 +35,7 @@ function triedSummary(strades, s) {
       else why = `PF ${pf.toFixed(2)}: kazançlar kayıpları karşılamıyor.`;
       if (status === 'emekli') why = `Emekli (${los.length} kayıp, PF ${pf.toFixed(2)}). ${why}`;
     }
-    return { id: L.id, name: L.desc, status, n, pnl_usdt: Math.round(pnl * 1e4) / 1e4, pf: Math.round(pf * 100) / 100,
+    return { no: i + 1, id: L.id, name: L.desc, status, n, pnl_usdt: Math.round(pnl * 1e4) / 1e4, pf: Math.round(pf * 100) / 100,
       bsr_pct: pct(bsr), wsr_pct: pct(wsr), wsr_gt_bsr: n > 0 && wsr > bsr, goal: GOALS[L.id] || '', why };
   }).sort((a, b) => b.pnl_usdt - a.pnl_usdt);
 }
@@ -151,7 +151,7 @@ async function squash(token) {
 
 // One-time page deploy: copies the old Claude Trader dashboard (index.html, PWA files, icons) from
 // alibingul-dev/claude-trader into gh-pages, rewires it to data.json and to chart data shipped inside data.json.
-const PAGES_VER = 'pages-v6';
+const PAGES_VER = 'pages-v7';
 const OLD = 'https://raw.githubusercontent.com/alibingul-dev/claude-trader/main/docs/';
 const CHART_OLD = "    const r = await fetch(`${CHART_URL}?symbol=${o.sym}&from=${Math.floor(o.openedAt)}&to=${Math.floor(o.closedAt || Date.now())}`);\n    const j = await r.json(); if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);";
 const CHART_NEW = "    // Oracle sürümü: grafik verisi data.json içinde gelir (15 dk kapanışlar); tarayıcı Binance'e bağlanmaz.\n    const cs = ((lastData && lastData.charts) || []).filter((c) => c.sym === o.sym);\n    const j = cs.sort((a, b) => Math.abs(a.openedAt - o.openedAt) - Math.abs(b.openedAt - o.openedAt))[0];\n    if (!j || Math.abs(j.openedAt - o.openedAt) > 30 * 60000) throw new Error(T('bu işlem için grafik verisi yok (son 20 gerçek ve 30 gölge işlem tutulur)'));";
@@ -178,14 +178,26 @@ const OPINION = `<style>#opn{margin:0 0 14px;padding:12px 14px;border:1px solid 
 // Tried-strategies table at the bottom of the "Strateji" view; fills itself from data.json.lab_summary.
 const TRIED_SECTION = '<section class="card" id="sec-denenen" data-view="strateji"><h2>Denenen stratejiler</h2><div class="sub" style="margin:-4px 0 10px">Laboratuvarda denenen her strateji: gölge işlemlerin PnL (USDT), BSR (kazanan işlem oranı) ve WSR (kazançların toplam mutlak PnL içindeki payı). Ölçüt: WSR &gt; BSR.</div><div class="scroll"><table id="tTried"></table></div></section>';
 const TRIED_SCRIPT = `<script>(function(){
+  // Sıralanabilir tablo (Ali, 28 Kas): başlığa tıkla; varsayılan sıra durum (aktif → aday → emekli), sonra PnL.
   const esc=(x)=>String(x==null?'':x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const RANK={aktif:0,aday:1,emekli:2};
+  const COLS=[['no','No'],['id','Kod'],['name','Ad'],['status','Durum'],['n','İşlem (adet)'],['pnl_usdt','PnL (USDT)'],['bsr_pct','BSR (%)'],['wsr_pct','WSR (%)'],['wsr_gt_bsr','WSR &gt; BSR'],['goal','Amaç'],['why','Neden başarısız / not']];
+  let L=[], key='status', dir=1;
+  const val=(x,k)=>k==='status'?(RANK[x.status]??9):k==='wsr_gt_bsr'?(x.wsr_gt_bsr?1:0):x[k];
+  const cmp=(a,b)=>{ const va=val(a,key), vb=val(b,key); const c=typeof va==='string'?va.localeCompare(vb,'tr'):(va-vb);
+    if(c) return c*dir; if(key==='status') return b.pnl_usdt-a.pnl_usdt; return a.no-b.no; };
+  function render(){
+    const col=(v)=>v>0?'var(--g)':v<0?'var(--r)':'var(--mut)';
+    const st=(s)=>s==='aktif'?'<b style="color:var(--g)">aktif</b>':s==='emekli'?'<span style="color:var(--r)">emekli</span>':'<span style="color:var(--mut)">aday</span>';
+    const t=document.getElementById('tTried');
+    t.innerHTML='<tr>'+COLS.map(([k,h])=>'<th data-k="'+k+'" style="cursor:pointer;user-select:none">'+h+(k===key?(dir>0?' ▲':' ▼'):'')+'</th>').join('')+'</tr>'+
+      [...L].sort(cmp).map((x)=>'<tr><td class="mono">'+x.no+'</td><td><b>'+esc(x.id)+'</b></td><td style="min-width:220px">'+esc(x.name)+'</td><td>'+st(x.status)+'</td><td>'+x.n+'</td><td style="color:'+col(x.pnl_usdt)+'">'+(x.pnl_usdt>0?'+':'')+x.pnl_usdt.toFixed(4)+'</td><td>'+x.bsr_pct.toFixed(1)+'</td><td>'+x.wsr_pct.toFixed(1)+'</td><td>'+(x.n?(x.wsr_gt_bsr?'<span style="color:var(--g)">✓</span>':'<span style="color:var(--r)">✗</span>'):'–')+'</td><td style="min-width:220px">'+esc(x.goal)+'</td><td style="min-width:260px">'+esc(x.why)+'</td></tr>').join('');
+    t.querySelectorAll('th[data-k]').forEach((th)=>th.onclick=()=>{ const k=th.dataset.k; if(k===key) dir=-dir; else { key=k; dir=(k==='status'||k==='no'||k==='id'||k==='name'||k==='goal'||k==='why')?1:-1; } render(); });
+  }
   async function draw(){
     try{
-      const r=await fetch(window.DATA_URL,{cache:'no-store'}); const d=await r.json(); const L=d.lab_summary||[];
-      const col=(v)=>v>0?'var(--g)':v<0?'var(--r)':'var(--mut)';
-      const st=(s)=>s==='aktif'?'<b style="color:var(--g)">aktif</b>':s==='emekli'?'<span style="color:var(--r)">emekli</span>':'<span style="color:var(--mut)">aday</span>';
-      document.getElementById('tTried').innerHTML='<tr><th>Kod</th><th>Ad</th><th>Durum</th><th>İşlem</th><th>PnL (USDT)</th><th>BSR (%)</th><th>WSR (%)</th><th>WSR &gt; BSR</th><th>Amaç</th><th>Neden başarısız / not</th></tr>'+
-        L.map((x)=>'<tr><td><b>'+esc(x.id)+'</b></td><td style="min-width:220px">'+esc(x.name)+'</td><td>'+st(x.status)+'</td><td>'+x.n+'</td><td style="color:'+col(x.pnl_usdt)+'">'+(x.pnl_usdt>0?'+':'')+x.pnl_usdt.toFixed(4)+'</td><td>'+x.bsr_pct.toFixed(1)+'</td><td>'+x.wsr_pct.toFixed(1)+'</td><td>'+(x.n?(x.wsr_gt_bsr?'<span style="color:var(--g)">✓</span>':'<span style="color:var(--r)">✗</span>'):'–')+'</td><td style="min-width:220px">'+esc(x.goal)+'</td><td style="min-width:260px">'+esc(x.why)+'</td></tr>').join('');
+      const r=await fetch(window.DATA_URL,{cache:'no-store'}); const d=await r.json();
+      L=(d.lab_summary||[]).map((x,i)=>({...x,no:x.no??i+1})); render();
     }catch(e){ const t=document.getElementById('tTried'); if(t) t.innerHTML='<tr><td>Tablo yüklenemedi: '+esc(e.message)+'</td></tr>'; }
   }
   draw(); setInterval(draw,60000);
