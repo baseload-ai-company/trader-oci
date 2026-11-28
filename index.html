@@ -540,14 +540,26 @@ async function load() {
 applyLang(); load(); setInterval(load, 5 * 60 * 1000);
 </script>
 <script>(function(){
+  // Sıralanabilir tablo (Ali, 28 Kas): başlığa tıkla; varsayılan sıra durum (aktif → aday → emekli), sonra PnL.
   const esc=(x)=>String(x==null?'':x).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const RANK={aktif:0,aday:1,emekli:2};
+  const COLS=[['no','No'],['id','Kod'],['name','Ad'],['status','Durum'],['n','İşlem (adet)'],['pnl_usdt','PnL (USDT)'],['bsr_pct','BSR (%)'],['wsr_pct','WSR (%)'],['wsr_gt_bsr','WSR &gt; BSR'],['goal','Amaç'],['why','Neden başarısız / not']];
+  let L=[], key='status', dir=1;
+  const val=(x,k)=>k==='status'?(RANK[x.status]??9):k==='wsr_gt_bsr'?(x.wsr_gt_bsr?1:0):x[k];
+  const cmp=(a,b)=>{ const va=val(a,key), vb=val(b,key); const c=typeof va==='string'?va.localeCompare(vb,'tr'):(va-vb);
+    if(c) return c*dir; if(key==='status') return b.pnl_usdt-a.pnl_usdt; return a.no-b.no; };
+  function render(){
+    const col=(v)=>v>0?'var(--g)':v<0?'var(--r)':'var(--mut)';
+    const st=(s)=>s==='aktif'?'<b style="color:var(--g)">aktif</b>':s==='emekli'?'<span style="color:var(--r)">emekli</span>':'<span style="color:var(--mut)">aday</span>';
+    const t=document.getElementById('tTried');
+    t.innerHTML='<tr>'+COLS.map(([k,h])=>'<th data-k="'+k+'" style="cursor:pointer;user-select:none">'+h+(k===key?(dir>0?' ▲':' ▼'):'')+'</th>').join('')+'</tr>'+
+      [...L].sort(cmp).map((x)=>'<tr><td class="mono">'+x.no+'</td><td><b>'+esc(x.id)+'</b></td><td style="min-width:220px">'+esc(x.name)+'</td><td>'+st(x.status)+'</td><td>'+x.n+'</td><td style="color:'+col(x.pnl_usdt)+'">'+(x.pnl_usdt>0?'+':'')+x.pnl_usdt.toFixed(4)+'</td><td>'+x.bsr_pct.toFixed(1)+'</td><td>'+x.wsr_pct.toFixed(1)+'</td><td>'+(x.n?(x.wsr_gt_bsr?'<span style="color:var(--g)">✓</span>':'<span style="color:var(--r)">✗</span>'):'–')+'</td><td style="min-width:220px">'+esc(x.goal)+'</td><td style="min-width:260px">'+esc(x.why)+'</td></tr>').join('');
+    t.querySelectorAll('th[data-k]').forEach((th)=>th.onclick=()=>{ const k=th.dataset.k; if(k===key) dir=-dir; else { key=k; dir=(k==='status'||k==='no'||k==='id'||k==='name'||k==='goal'||k==='why')?1:-1; } render(); });
+  }
   async function draw(){
     try{
-      const r=await fetch(window.DATA_URL,{cache:'no-store'}); const d=await r.json(); const L=d.lab_summary||[];
-      const col=(v)=>v>0?'var(--g)':v<0?'var(--r)':'var(--mut)';
-      const st=(s)=>s==='aktif'?'<b style="color:var(--g)">aktif</b>':s==='emekli'?'<span style="color:var(--r)">emekli</span>':'<span style="color:var(--mut)">aday</span>';
-      document.getElementById('tTried').innerHTML='<tr><th>Kod</th><th>Ad</th><th>Durum</th><th>İşlem</th><th>PnL (USDT)</th><th>BSR (%)</th><th>WSR (%)</th><th>WSR &gt; BSR</th><th>Amaç</th><th>Neden başarısız / not</th></tr>'+
-        L.map((x)=>'<tr><td><b>'+esc(x.id)+'</b></td><td style="min-width:220px">'+esc(x.name)+'</td><td>'+st(x.status)+'</td><td>'+x.n+'</td><td style="color:'+col(x.pnl_usdt)+'">'+(x.pnl_usdt>0?'+':'')+x.pnl_usdt.toFixed(4)+'</td><td>'+x.bsr_pct.toFixed(1)+'</td><td>'+x.wsr_pct.toFixed(1)+'</td><td>'+(x.n?(x.wsr_gt_bsr?'<span style="color:var(--g)">✓</span>':'<span style="color:var(--r)">✗</span>'):'–')+'</td><td style="min-width:220px">'+esc(x.goal)+'</td><td style="min-width:260px">'+esc(x.why)+'</td></tr>').join('');
+      const r=await fetch(window.DATA_URL,{cache:'no-store'}); const d=await r.json();
+      L=(d.lab_summary||[]).map((x,i)=>({...x,no:x.no??i+1})); render();
     }catch(e){ const t=document.getElementById('tTried'); if(t) t.innerHTML='<tr><td>Tablo yüklenemedi: '+esc(e.message)+'</td></tr>'; }
   }
   draw(); setInterval(draw,60000);
